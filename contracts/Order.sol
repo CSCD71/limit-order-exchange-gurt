@@ -16,7 +16,7 @@ contract Order {
     bool public ended;
 
     // Events
-    event OrderEnded(address winner, uint amount);
+    event OrderEnded();
 
     constructor(uint _lifetime) {
         owner = msg.sender;
@@ -29,7 +29,7 @@ contract Order {
     }
     
     // Use function: allows users to use an order
-    function use(address user) public {
+    function use(address user) public returns (bool) {
         require(block.timestamp < orderEndTime, "Order already ended.");
 
         ended = true; // like MyToken example, mark as true before doing payment  
@@ -43,13 +43,12 @@ contract Order {
 
         // check for success... SimpleAuction example here for reference
         // (bool success, ) = payable(msg.sender).call{ value: amount }("");
-        if (!success) {
-            ended = false;
-            return false;
-        }
+        // if (!success) {
+        //     ended = false;
+        //     return false;
+        // }
 
         return true;
-        emit BidPlaced(msg.sender, msg.value);
     }
 
     // Cancel the order and send tokens back to the owner
@@ -57,7 +56,7 @@ contract Order {
         require(!ended, "Order already ended.");
 
         ended = true;
-        emit OrderEnded(highestBidder, highestBid);
+        emit OrderEnded();
 
         // Transfer funds to the owner
         // ERC20(tokenA).transferFrom(from, to, value);
