@@ -1,0 +1,70 @@
+<!doctype html>
+<!-- UI built with the assistance of AI tools -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>GurtEX</title>
+    <link rel="stylesheet" href="static/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo" aria-hidden="true">Gurt</div>
+        <div class="brand-text">
+          <h1>GurtEX</h1>
+        </div>
+      </div>
+      <div class="wallet">
+        <div class="wallet-row">
+          <select id="networkSelect" class="select"></select>
+          <button id="connectButton" class="btn">Connect Wallet</button>
+        </div>
+        <div id="walletStatus" class="status" aria-live="polite"></div>
+      </div>
+    </header>
+
+    <main class="content">
+      <div id="contractLink" class="contract-link" hidden>
+        Exchange contract deployed on
+        <a id="contractLinkUrl" href="#" target="_blank" rel="noreferrer"></a>
+      </div>
+      <section class="panel">
+        <div class="panel-head" id="panelHead">
+          <h2>Swap Tokens</h2>
+        </div>
+        <div id="message" class="message" role="status"></div>
+
+        <form id="swapForm" class="form">
+          <label class="field">
+            <span>From Token</span>
+            <select id="fromToken" class="select" required></select>
+          </label>
+          <label class="field">
+            <span>To Token</span>
+            <select id="toToken" class="select" required></select>
+          </label>
+          <label class="field">
+            <span>Amount</span>
+            <input id="swapAmount" type="number" min="0" step="0.0001" placeholder="0.0" required />
+          </label>
+          <div class="form-actions">
+            <button type="submit" class="btn">Swap</button>
+          </div>
+        </form>
+      </section>
+    </main>
+
+    <div id="txModal" class="modal" hidden>
+      <div class="modal-card">
+        <div class="modal-head">
+          <h3>Transaction Confirmed</h3>
+          <button id="closeModal" class="btn ghost">Close</button>
+        </div>
+        <div id="txBody" class="modal-body"></div>
+      </div>
+    </div>
+
+    <script type="module" src="static/app.js"></script>
+  </body>
+</html>
