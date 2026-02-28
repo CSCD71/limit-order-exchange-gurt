@@ -5,6 +5,7 @@ import { Order } from "./Order.sol";
 
 contract Exchange {
 
+    /*
     //Store current available orders
     struct Order {
         address seller;
@@ -19,7 +20,10 @@ contract Exchange {
         bytes signature;
     }
     mapping(uint => Order) public orders;
+    */
     uint public orderCount = 0; // Simple incrementor for order IDs
+    mapping(uint => bool) public usedNonces;
+    mapping(address -> uint) public deadlines;
 
     // Events for off-chain order book tracking
     event OrderDeployed(
@@ -53,6 +57,7 @@ contract Exchange {
         require(amountA > 0 && amountB > 0, "Invalid amounts");
         
         uint orderId = orderCount++;
+        /*
         orders[orderId] = Order({
             seller: msg.sender,
             tokenA: tokenA,
@@ -65,20 +70,35 @@ contract Exchange {
             nonce: nonce,
             signature: signature
         });
-
+        */
+        // Todo: Validate signature
         emit OrderDeployed(orderId, msg.sender, tokenA, tokenB, amountA, amountB, block.timestamp + lifetime, nonce, signature);
         return orderId;
     }
 
     // Fill an order partially by specifying how much tokenA you want
     // Todo: bulk orders
-    function fillOrder(uint orderId, uint desiredAmountA) public returns (bool) {
+    function fillOrder(
+        address seller,
+        address tokenA,
+        address tokenB,
+        uint amountA,
+        uint amountB,
+        uint lifetime,
+        uint nonce,
+        bytes signature,
+        uint desiredAmountA,
+        uint orderId) public returns (bool) {
+        // Todo: Validate signature and nonce, check for replay attack
+        /*
         Order storage order = orders[orderId];
         
         require(order, "Order does not exist or was cancelled");
         require(block.timestamp < order.deadline, "Order expired");
         require(order.filledAmountA < order.amountA, "Order fully filled");
+        */
         
+        // This section also needs editing
         uint remainingAmountA = order.amountA - order.filledAmountA;
         uint remainingAmountB = order.amountB - order.filledAmountB;
         
@@ -103,12 +123,24 @@ contract Exchange {
         return true;
     }
 
-    function cancelOrder(uint orderId) public {
+    function cancelOrder(
+        address seller,
+        address tokenA,
+        address tokenB,
+        uint amountA,
+        uint amountB,
+        uint lifetime,
+        uint nonce,
+        bytes signature,
+        uint orderId) public {
+        /*
         Order storage order = orders[orderId];
         require(order, "Order does not exist or already cancelled");
-        require(msg.sender == order.seller, "Only seller can cancel");
+        */
+        require(msg.sender == seller, "Only seller can cancel");
         
-        delete orders[orderId];
+        //delete orders[orderId];
+        // Todo: Mark nonce as used, reset seller deadline.
         emit OrderCancelled(orderId);
     }
 
