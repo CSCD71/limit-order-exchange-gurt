@@ -7,17 +7,23 @@ contract Exchange {
 
     // Events
     event OrderDeployed(
-        address indexed auction, 
-        address indexed owner,
-        string label,
+        address indexed order,
+        address indexed seller,
+        address tokenA,
+        address tokenB,
+        uint amountA,
+        uint amountB,
         uint lifetime
     );
-	
-    function createOrder(string calldata label, uint lifetime, bool emitOnChain) public {
+
+    function createOrder(address tokenA, address tokenB, uint amountA, uint amountB, uint lifetime, bool emitOnChain) public returns (address) {
+        // TBD: check via ERC20 allowance(seller, spender) that Exchance is allowed to 
         Order order = new Order(lifetime);
-        order.setOwner(msg.sender);
+        order.setSeller(msg.sender);
+        order.initialize(tokenA, tokenB, amountA, amountB);
         if (emitOnChain) {
-            emit OrderDeployed(address(order), msg.sender, label, lifetime);
+            emit OrderDeployed(address(order), msg.sender, tokenA, tokenB, amountA, amountB, lifetime);
         }
+        return address(order);
     }
 }
