@@ -40,7 +40,7 @@ contract Exchange is EIP712 {
         uint256 deadline,
         uint256 nonce,
         bytes memory signature,
-        bool emitOnChain
+        bool postOnChain
     ) public returns (bool) {
         // Verify order values
         require(tokenA != address(0), "Invalid tokenA");
@@ -53,7 +53,6 @@ contract Exchange is EIP712 {
             abi.encode(
                 ORDER_TYPEHASH,
                 msg.sender,
-                address(this),
                 tokenA,
                 tokenB,
                 amountA,
@@ -69,7 +68,7 @@ contract Exchange is EIP712 {
         // Keep track of seller's order
         activeOrders[msg.sender] = deadline;
         // Optionally broadcast order on chain
-        if (emitOnChain) {
+        if (postOnChain) {
             emit OrderPosted(
               msg.sender,
               tokenA,
@@ -90,7 +89,6 @@ contract Exchange is EIP712 {
 
     function fillOrder(
         address seller,
-        address spender,
         address tokenA,
         address tokenB,
         uint256 amountA,
@@ -109,7 +107,6 @@ contract Exchange is EIP712 {
             abi.encode(
                 ORDER_TYPEHASH,
                 seller,
-                spender,
                 tokenA,
                 tokenB,
                 amountA,
