@@ -138,7 +138,7 @@ let publicClient = null;
 let currentChainId = null;
 let currentAccount = null;
 let currentExplorerBase = null;
-let orderNonce = 0n;
+let orderNonce = 67n;
 
 function setMessage(text, tone = "info") {
   message.textContent = text;
@@ -976,9 +976,21 @@ orderForm?.addEventListener("submit", async (event) => {
       : null;
 
     const shortHash = `${hash.slice(0, 6)}...${hash.slice(-4)}`;
-    txBody.innerHTML = link
+    // show confirmation plus order details within modal body
+    let bodyHtml = link
       ? `Order created successfully!<br />Hash: <a href="${link}" target="_blank" rel="noreferrer">${shortHash}</a>`
       : `Order created successfully!<br />Hash: ${shortHash}`;
+    bodyHtml += `<pre class="modal-body">` +
+      `seller: ${currentAccount}\n` +
+      `tokenA: ${tokenAAddr}\n` +
+      `tokenB: ${tokenBAddr}\n` +
+      `amountA: ${parsedAmountA.toString()}\n` +
+      `amountB: ${parsedAmountB.toString()}\n` +
+      `deadline: ${deadline.toString()}\n` +
+      `nonce: ${nonce.toString()}\n` +
+      `signature: ${signature}` +
+      `</pre>`;
+    txBody.innerHTML = bodyHtml;
     txModal.hidden = false;
 
     orderForm.reset();

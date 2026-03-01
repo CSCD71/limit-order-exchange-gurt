@@ -6,8 +6,8 @@
   --panel-2: #1d2230;
   --text: #f2f4ff;
   --muted: #b8c0d1;
-  --accent: #ffb15e;
-  --accent-2: #ff6b6b;
+  --accent: #f74dc7;
+  --accent-2: #de68e2;
   --border: #2a3143;
   --shadow: rgba(0, 0, 0, 0.35);
 }
@@ -316,6 +316,13 @@ body {
   margin-top: 12px;
   color: var(--muted);
   font-size: 14px;
+  text-wrap: wrap;
+}
+
+/* ensure preformatted order summaries can wrap long hex signatures */
+.modal-body pre {
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .modal-body a {
