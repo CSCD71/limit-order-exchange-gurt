@@ -468,49 +468,55 @@ async function signOrderWithEIP712(
     throw new Error("Chain not found.");
   }
 
-  const domain = {
-    name: "GurtEX",
-    version: "1",
-    chainId: currentChainId,
-    // hardcoding of contract address
-    verifyingContract: getAddress("0xCE447D412Fc82c2A1Be9FFD055391c521f4401C2")
+  const typedData = {
+    types: {
+      EIP712Domain: [
+        { name: "name", type: "string" },
+        { name: "version", type: "string" },
+        { name: "chainId", type: "uint256" },
+        { name: "verifyingContract", type: "address" }
+      ],
+      Order: [
+        { name: "seller", type: "address" },
+        { name: "tokenA", type: "address" },
+        { name: "tokenB", type: "address" },
+        { name: "amountA", type: "uint256" },
+        { name: "amountB", type: "uint256" },
+        { name: "deadline", type: "uint256" },
+        { name: "nonce", type: "uint256" }
+      ]
+    },
+    primaryType: "Order",
+    domain: {
+      name: "GurtEX",
+      version: "1",
+      chainId: currentChainId,
+      verifyingContract: getAddress("0xCE447D412Fc82c2A1Be9FFD055391c521f4401C2")
+    },
+    message: {
+      seller: currentAccount,
+      tokenA: getAddress(tokenA),
+      tokenB: getAddress(tokenB),
+      amountA: amountA.toString(),
+      amountB: amountB.toString(),
+      deadline: deadline.toString(),
+      nonce: nonce.toString()
+    }
   };
 
-  const types = {
-    Order: [
-      { name: "seller", type: "address" },
-      { name: "tokenA", type: "address" },
-      { name: "tokenB", type: "address" },
-      { name: "amountA", type: "uint256" },
-      { name: "amountB", type: "uint256" },
-      { name: "deadline", type: "uint256" },
-      { name: "nonce", type: "uint256" }
-    ]
-  };
-
-  const value = {
-    seller: currentAccount,
-    tokenA: getAddress(tokenA),
-    tokenB: getAddress(tokenB),
-    amountA: Number(amountA),
-    amountB: Number(amountB),
-    deadline: Number(deadline),
-    nonce: Number(nonce)
-  };
+  console.log(`seller: ${typedData.message.seller}`);
+  console.log(`tokenA: ${typedData.message.tokenA}`);
+  console.log(`tokenB: ${typedData.message.tokenB}`);
+  console.log(`amountA: ${typedData.message.amountA}`);
+  console.log(`amountB: ${typedData.message.amountB}`);
+  console.log(`deadline: ${typedData.message.deadline}`);
+  console.log(`nonce: ${typedData.message.nonce}`);
 
   try {
-    // Use the wallet provider's signTypedData_v4
+    // Use the wallet provider's eth_signTypedData_v4
     const signature = await window.ethereum.request({
       method: "eth_signTypedData_v4",
-      params: [
-        currentAccount,
-        JSON.stringify({
-          types,
-          primaryType: "Order",
-          domain,
-          message: value
-        })
-      ]
+      params: [currentAccount, JSON.stringify(typedData)]
     });
     return signature;
   } catch (error) {
@@ -855,9 +861,8 @@ orderForm?.addEventListener("submit", async (event) => {
   try {
     setMessage("Validating order details...");
 
-    // Parse amounts (assuming they are in standard decimal format)
-    const parsedAmountA = BigInt(Math.floor(Number(amountAVal) * 1e18));
-    const parsedAmountB = BigInt(Math.floor(Number(amountBVal) * 1e18));
+    const parsedAmountA = BigInt(Math.floor(Number(amountAVal)));
+    const parsedAmountB = BigInt(Math.floor(Number(amountBVal)));
 
     if (parsedAmountA <= 0n || parsedAmountB <= 0n) {
       setMessage("Amounts must be greater than 0.");
