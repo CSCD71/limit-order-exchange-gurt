@@ -31,25 +31,46 @@
       </div>
       <section class="panel">
         <div class="panel-head" id="panelHead">
-          <h2>Swap Tokens</h2>
+          <h2>Create Token Exchange Order</h2>
         </div>
         <div id="message" class="message" role="status"></div>
 
-        <form id="swapForm" class="form">
+        <form id="orderForm" class="form">
           <label class="field">
-            <span>From Token</span>
+            <span>Selling Token</span>
             <select id="fromToken" class="select" required></select>
           </label>
           <label class="field">
-            <span>To Token</span>
+            <span>Receiving Token</span>
             <select id="toToken" class="select" required></select>
           </label>
-          <label class="field">
-            <span>Amount</span>
-            <input id="swapAmount" type="number" min="0" step="0.0001" placeholder="0.0" required />
-          </label>
+          <div class="field">
+            <span>Amounts</span>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <input id="amountA" type="number" min="0" step="0.0001" placeholder="Token A" required />
+              <input id="amountB" type="number" min="0" step="0.0001" placeholder="Token B" required />
+            </div>
+          </div>
+          <div class="field">
+            <span>Order Duration</span>
+            <div id="durationControls" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+              <label><input type="radio" name="durationType" value="relative" checked /> Hours/Days</label>
+              <label><input type="radio" name="durationType" value="absolute" /> Date/Time</label>
+            </div>
+            <div id="durationInputs" style="margin-top:8px;">
+              <input id="durationRelative" type="number" min="1" step="1" placeholder="Hours (e.g. 24)" />
+              <input id="durationAbsolute" type="datetime-local" style="display:none;" />
+            </div>
+          </div>
+          <div class="field">
+            <span>Post On-Chain?</span>
+            <div id="postOnChainControls" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+              <label><input type="radio" name="postOnChain" value="yes" checked /> Yes pls</label>
+              <label><input type="radio" name="postOnChain" value="no" /> No thx</label>
+            </div>
+          </div>
           <div class="form-actions">
-            <button type="submit" class="btn">Swap</button>
+            <button type="submit" class="btn">Create</button>
           </div>
         </form>
       </section>

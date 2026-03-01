@@ -1,9 +1,11 @@
+/* CSS file repurposed from CSCD21 The Auction House. */
+
 :root {
   --bg: #0e0f13;
   --panel: #161923;
   --panel-2: #1d2230;
   --text: #f2f4ff;
-  --muted: #9ba3b4;
+  --muted: #b8c0d1;
   --accent: #ffb15e;
   --accent-2: #ff6b6b;
   --border: #2a3143;
