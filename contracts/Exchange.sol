@@ -12,6 +12,9 @@ contract Exchange is EIP712 {
         "Order(address seller,address tokenA,address tokenB,uint256 amountA,uint256 amountB,uint256 deadline,uint256 nonce)"
     );
 
+    // Keep track of sellers' active order
+    mapping(address => uint256) public activeOrders;
+
     // Keep track of used orders
     mapping(bytes32 => bool) public used;
 
@@ -24,7 +27,7 @@ contract Exchange is EIP712 {
         uint256 amountB,
         uint256 deadline,
         uint256 nonce,
-        bytes32 signature
+        bytes signature
     );
 
 	  constructor() EIP712("GurtEX", "1") {}
@@ -36,10 +39,36 @@ contract Exchange is EIP712 {
         uint256 amountB,
         uint256 deadline,
         uint256 nonce,
-        bytes32 signature,
+        bytes memory signature,
         bool emitOnChain
     ) public returns (bool) {
-        // TBD: verify order values?
+        // Verify order values
+        require(tokenA != address(0), "Invalid tokenA");
+        require(tokenB != address(0), "Invalid tokenB");
+        require(amountA > 0, "Value amountA must be positive");
+        require(amountB > 0, "Value amountB must be positive");
+        require(deadline > block.timestamp, "Deadline must be in the future");
+        // Verify signature
+        bytes32 hash = _hashTypedDataV4(keccak256(
+            abi.encode(
+                ORDER_TYPEHASH,
+                msg.sender,
+                address(this),
+                tokenA,
+                tokenB,
+                amountA,
+                amountB,
+                deadline,
+                nonce
+            )
+        ));
+        require(!used[hash], "Cannot create an order that has already been filled");
+        // Check that the signer is the msg.sender
+        address signer = ECDSA.recover(hash, signature);
+        require(signer == msg.sender, "Invalid signature");
+        // Keep track of seller's order
+        activeOrders[msg.sender] = deadline;
+        // Optionally broadcast order on chain
         if (emitOnChain) {
             emit OrderPosted(
               msg.sender,
@@ -55,6 +84,10 @@ contract Exchange is EIP712 {
         return true;
     }
 
+    function cancelActiveOrder() public {
+        activeOrders[msg.sender] = 0;
+    }
+
     function fillOrder(
         address seller,
         address spender,
@@ -64,13 +97,15 @@ contract Exchange is EIP712 {
         uint256 amountB,
         uint256 deadline,
         uint256 nonce,
-        bytes32 signature,
+        bytes memory signature,
         uint256 offer
     ) public returns (bool) {
-        // check if the order has expired
+        // Check that the order is active
+        require(activeOrders[seller] == deadline, "Order is inactive");
+        // Check if the order has expired
         require(block.timestamp <= deadline, "Order has expired");
-        // create the hash assuming the seller allows the transaction caller to spend amount of token
-        bytes32 structHash = keccak256(
+        // Create the hash assuming the seller allows the transaction caller to spend amount of token
+        bytes32 hash = _hashTypedDataV4(keccak256(
             abi.encode(
                 ORDER_TYPEHASH,
                 seller,
@@ -82,21 +117,27 @@ contract Exchange is EIP712 {
                 deadline,
                 nonce
             )
-        );
-        bytes32 hash = _hashTypedDataV4(structHash);
-        // check if the order has been fully used already
+        ));
+        // Check if the order has been fully used already
         require(!used[hash], "Order has been filled already");
-        // extract the signer
+        // Extract the signer
         address from = ECDSA.recover(hash, signature);
-        // check that the signer is the seller
+        // Check that the signer is the seller
         if (from != seller) {
             return false;
         }
-        // mark the order as used if fully used? check ERC20 allowance?
+        // Mark the order as used if fully used? check ERC20 allowance?
         used[hash] = true;
-        // token exchange (check that this contract can spend on behalf of msg.sender)
-        ERC20(tokenA).transferFrom(seller, msg.sender, offer/amountB * amountA); // need safer math
-        ERC20(tokenB).transferFrom(msg.sender, seller, offer);
+        // Token exchange (check that this contract can spend on behalf of msg.sender)
+        require(ERC20(tokenB).allowance(msg.sender, address(this)) >= offer, "Buyer has not approved GurtEX");
+        // Note on ERC20:transferFrom... 
+        // this forum thread recommends SafeERC20? 
+        // thread: https://forum.openzeppelin.com/t/should-i-check-for-transfer-result-for-an-erc20/37018
+        // SafeERC20: https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/token/ERC20/utils/SafeERC20.sol 
+        bool success = ERC20(tokenA).transferFrom(from, msg.sender, offer/amountB * amountA); // need safer math
+        require(success, "Failed to transfer tokenA");
+        success = ERC20(tokenB).transferFrom(msg.sender, from, offer);
+        require(success, "Failed to transfer tokenB");
         return true;
     }
 }
