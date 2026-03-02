@@ -23,10 +23,15 @@ const privateKeys = [
     "0x2a871d0798f97d79848a013d4936a73bf4cc922c825d33c1cf7073dff6d409c6",
 ];
 
+let tokenAddresses = [];
+let tokenABIs = [];
+
+/*
 const sampleTokens = [
     "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
     "0x3e622317f8C93f7328350cF0B56d9eD4C620C5d6",
 ]
+*/
 
 function loadContract(contract) {
   const content = readFileSync(join('out', `${contract}.sol`, `${contract}.json`), "utf8");
@@ -98,6 +103,9 @@ describe("Exchange", function () {
     const receipts = [];
     
     let currentTime;
+    const tokenAQuantity1 = parseEther("1");
+    const tokenBQuantity1 = parseEther("1");
+    const offer1 = parseEther("1");
     //const biddingTime = BigInt(60);
     //const firstBid = parseEther("1");
     //const secondBid = parseEther("2");
@@ -134,6 +142,28 @@ describe("Exchange", function () {
         currentTime = block.timestamp;
         const address = receipt.contractAddress;
         contract = {address, abi};
+        // compile mock tokens contract
+        const { abi: abi2, bytecode: bytecode2 } = loadContract("MockERC20");
+        const { abi: abi3, bytecode: bytecode3 } = loadContract("MockERC20");
+        // deploy mock tokens
+        const hash2 = await seller1.deployContract({
+            abi: abi2,
+            bytecode: bytecode2,
+            args: ["TokenA", "TKA"]
+        });
+        const hash3 = await seller1.deployContract({
+            abi: abi3,
+            bytecode: bytecode3,
+            args: ["TokenB", "TKB"]
+        });
+        const receipt2 = await client.waitForTransactionReceipt({ hash: hash2 });
+        const receipt3 = await client.waitForTransactionReceipt({ hash: hash3 });
+        receipts.push({label: "Deployment TokenA", receipt: receipt2});
+        receipts.push({label: "Deployment TokenB", receipt: receipt3});
+        tokenAddresses.push(receipt2.contractAddress);
+        tokenAddresses.push(receipt3.contractAddress);
+        tokenABIs.push(abi2);
+        tokenABIs.push(abi3);
     });
     
     describe("Sell Order", function (){
@@ -142,9 +172,11 @@ describe("Exchange", function () {
         const time = BigInt(60);
         const nonce = getNonce();
         beforeAll(async () => {
+            // Mint tokens to seller1
+            await seller1.writeContract({ address: tokenAddresses[0], abi: tokenABIs[0], functionName: "mint", args: [seller1.account.address, parseEther("1")] });
             signature = await signOrderWithEIP712(
-                sampleTokens[0],
-                sampleTokens[1],
+                tokenAddresses[0],
+                tokenAddresses[1],
                 parseEther("1"),
                 parseEther("1"),
                 currentTime + time,
@@ -154,7 +186,7 @@ describe("Exchange", function () {
                 foundry.id
             );
             const { address, abi } = contract;
-            const hash = await seller1.writeContract({ address, abi, functionName: "createOrder", args: [sampleTokens[0], sampleTokens[1], parseEther("1"), parseEther("1"), currentTime + time, nonce, signature, true] });
+            const hash = await seller1.writeContract({ address, abi, functionName: "createOrder", args: [tokenAddresses[0], tokenAddresses[1], parseEther("1"), parseEther("1"), currentTime + time, nonce, signature, true] });
             receipt = await client.waitForTransactionReceipt({ hash });
             receipts.push({label: "Sell Order", receipt});
         });
@@ -167,8 +199,8 @@ describe("Exchange", function () {
             const { args, eventName } = decodeEventLog({abi, data: log.data, topics: log.topics });
             expect(eventName).to.equal('OrderPosted');
             expect(args.seller).to.equal(seller1.account.address);
-            expect(args.tokenA).to.equal(sampleTokens[0]);
-            expect(args.tokenB).to.equal(sampleTokens[1]);
+            expect(args.tokenA).to.equal(tokenAddresses[0]);
+            expect(args.tokenB).to.equal(tokenAddresses[1]);
             expect(args.amountA).to.equal(parseEther("1"));
             expect(args.amountB).to.equal(parseEther("1"));
             expect(args.deadline).to.equal(currentTime + time);
@@ -178,7 +210,57 @@ describe("Exchange", function () {
     });
 
     describe("Buy Order", function (){
-        
+        let receipt;
+        let receipt2;
+        let balanceA1Before, balanceB1Before, balanceA2Before, balanceB2Before;
+        let signature;
+        const time = BigInt(60);
+        const nonce = getNonce();
+        beforeAll(async () => {
+            // Mint tokens to seller1 and buyer1
+            await seller1.writeContract({ address: tokenAddresses[0], abi: tokenABIs[0], functionName: "mint", args: [seller1.account.address, parseEther("1")] });
+            await buyer1.writeContract({ address: tokenAddresses[1], abi: tokenABIs[1], functionName: "mint", args: [buyer1.account.address, parseEther("1")] });
+            
+            balanceA1Before = await buyer1.readContract({ address: tokenAddresses[0], abi: tokenABIs[0], functionName: "balanceOf", args: [buyer1.account.address] });
+            balanceB1Before = await buyer1.readContract({ address: tokenAddresses[1], abi: tokenABIs[1], functionName: "balanceOf", args: [buyer1.account.address] });
+            balanceA2Before = await seller1.readContract({ address: tokenAddresses[0], abi: tokenABIs[0], functionName: "balanceOf", args: [seller1.account.address] });
+            balanceB2Before = await seller1.readContract({ address: tokenAddresses[1], abi: tokenABIs[1], functionName: "balanceOf", args: [seller1.account.address] });
+
+            signature = await signOrderWithEIP712(
+                tokenAddresses[0],
+                tokenAddresses[1],
+                parseEther("1"),
+                parseEther("1"),
+                currentTime + time,
+                nonce,
+                seller1,
+                contract.address,
+                foundry.id
+            );
+            const { address, abi } = contract;
+            const hash = await seller1.writeContract({ address, abi, functionName: "createOrder", args: [tokenAddresses[0], tokenAddresses[1], parseEther("1"), parseEther("1"), currentTime + time, nonce, signature, true] });
+            receipt = await client.waitForTransactionReceipt({ hash });
+            receipts.push({label: "Sell Order", receipt});
+
+            // Approve the exchange contract to transfer tokens on behalf of buyer1
+            await buyer1.writeContract({ address: tokenAddresses[0], abi: tokenABIs[0], functionName: "approve", args: [contract.address, parseEther("1")] });
+            // and on behalf of seller1
+            await seller1.writeContract({ address: tokenAddresses[1], abi: tokenABIs[1], functionName: "approve", args: [contract.address, parseEther("1")] });
+            // Create buy order
+            const hash2 = await buyer1.writeContract({ address, abi, functionName: "fillOrder", args: [seller1.account.address, tokenAddresses[0], tokenAddresses[1], parseEther("1"), parseEther("1"), currentTime + time, nonce, signature, parseEther("1")] });
+            receipt2 = await client.waitForTransactionReceipt({ hash: hash2 });
+            receipts.push({label: "Buy Order", receipt: receipt2});
+        });
+        it("Should have transferred the tokens correctly", async function () {
+            const balanceA1After = await buyer1.readContract({ address: tokenAddresses[0], abi: tokenABIs[0], functionName: "balanceOf", args: [buyer1.account.address] });
+            const balanceB1After = await buyer1.readContract({ address: tokenAddresses[1], abi: tokenABIs[1], functionName: "balanceOf", args: [buyer1.account.address] });
+            const balanceA2After = await seller1.readContract({ address: tokenAddresses[0], abi: tokenABIs[0], functionName: "balanceOf", args: [seller1.account.address] });
+            const balanceB2After = await seller1.readContract({ address: tokenAddresses[1], abi: tokenABIs[1], functionName: "balanceOf", args: [seller1.account.address] });
+            expect(balanceA1After).to.equal(balanceA1Before - parseEther("1"));
+            expect(balanceB1After).to.equal(balanceB1Before + parseEther("1"));
+            expect(balanceA2After).to.equal(balanceA2Before + parseEther("1"));
+            expect(balanceB2After).to.equal(balanceB2Before - parseEther("1"));
+        });
     });
 
     describe("Partial Buy Order", function (){
