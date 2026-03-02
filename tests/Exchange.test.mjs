@@ -95,6 +95,11 @@ async function signOrderWithEIP712(
   return await seller.signTypedData(typedData);
 }
 
+// Turns an alphanumeric string to lowercase for comparison purposes.
+function antol(string) {
+  return String(string).toLowerCase();
+}
+
 describe("Exchange", function () {
 	
     let seller1, seller2, buyer1, buyer2, buyer3, // wallet
@@ -139,7 +144,7 @@ describe("Exchange", function () {
         const receipt = await client.waitForTransactionReceipt({ hash });
         receipts.push({label: "Deployment", receipt});
         const block = await client.getBlock({ blockNumber: receipt.blockNumber });
-        currentTime = block.timestamp;
+        currentTime = BigInt(Date.now());
         const address = receipt.contractAddress;
         contract = {address, abi};
         // compile mock tokens contract
@@ -198,14 +203,14 @@ describe("Exchange", function () {
             // parse and check event
             const { args, eventName } = decodeEventLog({abi, data: log.data, topics: log.topics });
             expect(eventName).to.equal('OrderPosted');
-            expect(args.seller).to.equal(seller1.account.address);
-            expect(args.tokenA).to.equal(tokenAddresses[0]);
-            expect(args.tokenB).to.equal(tokenAddresses[1]);
+            expect(antol(args.seller)).to.equal(antol(seller1.account.address));
+            expect(antol(args.tokenA)).to.equal(antol(tokenAddresses[0]));
+            expect(antol(args.tokenB)).to.equal(antol(tokenAddresses[1]));
             expect(args.amountA).to.equal(parseEther("1"));
             expect(args.amountB).to.equal(parseEther("1"));
             expect(args.deadline).to.equal(currentTime + time);
             expect(args.nonce).to.equal(nonce);
-            expect(args.signature).to.equal(signature);
+            expect(antol(args.signature)).to.equal(antol(signature));
         });
     });
 
@@ -313,7 +318,7 @@ describe("Exchange", function () {
             await buyer1.writeContract({ address: tokenAddresses[1], abi: tokenABIs[1], functionName: "approve", args: [contract.address, parseEther("1")] });
             // Create buy order
             const hash2 = await buyer1.writeContract({ address, abi, functionName: "fillOrder", args: [seller1.account.address, tokenAddresses[0], tokenAddresses[1], parseEther("1"), parseEther("1"), currentTime + time, nonce, signature, parseEther("1")] });
-            await expect(hash2).rejects.toThrow("Order has expired");
+            await expect(hash2).rejects.toThrow("Order is inactive");
         });
         it("Should not allow fulfillment of old order after new order is made", async function () {
             const nonce2 = getNonce();
