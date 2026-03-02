@@ -4,6 +4,7 @@ pragma solidity ^0.8.32;
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import {FixedPointMathLib} from "@solmate/src/utils/FixedPointMathLib.sol";
 
 contract Exchange is EIP712 {
     using ECDSA for bytes32;
@@ -130,8 +131,13 @@ contract Exchange is EIP712 {
         // Note on ERC20:transferFrom... 
         // this forum thread recommends SafeERC20? 
         // thread: https://forum.openzeppelin.com/t/should-i-check-for-transfer-result-for-an-erc20/37018
-        // SafeERC20: https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/token/ERC20/utils/SafeERC20.sol 
-        bool success = ERC20(tokenA).transferFrom(from, msg.sender, offer/amountB * amountA); // need safer math
+        // SafeERC20: https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/token/ERC20/utils/SafeERC20.sol
+
+        // Fixed Point Math from https://rareskills.io/post/solidity-fixed-point#converting-an-integer-to-a-fixed-point-number
+        // Github: https://github.com/transmissions11/solmate/blob/main/src/utils/FixedPointMathLib.sol
+        uint256 amountToTransfer = FixedPointMathLib.mulDivDown(offer, amountA, amountB);
+
+        bool success = ERC20(tokenA).transferFrom(from, msg.sender, amountToTransfer);
         require(success, "Failed to transfer tokenA");
         success = ERC20(tokenB).transferFrom(msg.sender, from, offer);
         require(success, "Failed to transfer tokenB");
