@@ -278,7 +278,6 @@ describe("Exchange", function () {
     describe("Expired Buy Order", function (){
         let receipt;
         let receipt2;
-        let receipt3;
         let signature;
         const time = BigInt(60);
         const nonce = getNonce();
@@ -345,6 +344,42 @@ describe("Exchange", function () {
     });
 
     describe("Cancel Sell Order", function (){
+        let receipt;
+        let receipt2;
+        let signature;
+        const time = BigInt(60);
+        const nonce = getNonce();
+        beforeAll(async () => {
+            // Mint tokens to seller1 and buyer1
+            await seller1.writeContract({ address: tokenAddresses[0], abi: tokenABIs[0], functionName: "mint", args: [seller1.account.address, parseEther("1")] });
+            await buyer1.writeContract({ address: tokenAddresses[1], abi: tokenABIs[1], functionName: "mint", args: [buyer1.account.address, parseEther("1")] });
+            signature = await signOrderWithEIP712(
+                tokenAddresses[0],
+                tokenAddresses[1],
+                parseEther("1"),
+                parseEther("1"),
+                currentTime + time,
+                nonce,
+                seller1,
+                contract.address,
+                foundry.id
+            );
+            const { address, abi } = contract;
+            const hash = await seller1.writeContract({ address, abi, functionName: "createOrder", args: [tokenAddresses[0], tokenAddresses[1], parseEther("1"), parseEther("1"), currentTime + time, nonce, signature, true] });
+            receipt = await client.waitForTransactionReceipt({ hash });
+            receipts.push({label: "Sell Order", receipt});
 
+            // Approve the exchange contract to transfer tokens on behalf of seller1
+            await seller1.writeContract({ address: tokenAddresses[0], abi: tokenABIs[0], functionName: "approve", args: [contract.address, parseEther("1")] });
+            // Cancel the order
+            await seller1.writeContract({ address, abi, functionName: "cancelActiveOrder", args: [] });
+        });
+        it("Should not allow filling the cancelled order", async function () {
+            // approve buyer1 spending
+            await buyer1.writeContract({ address: tokenAddresses[1], abi: tokenABIs[1], functionName: "approve", args: [contract.address, parseEther("1")] });
+            // Create buy order
+            const hash2 = await buyer1.writeContract({ address, abi, functionName: "fillOrder", args: [seller1.account.address, tokenAddresses[0], tokenAddresses[1], parseEther("1"), parseEther("1"), currentTime + time, nonce, signature, parseEther("1")] });
+            await expect(hash2).rejects.toThrow("Order is inactive");
+        });
     });
 });
