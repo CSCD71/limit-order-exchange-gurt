@@ -427,44 +427,6 @@ async function addTimestampsToLogs(logs) {
   return logs.map((log) => ({ ...log, blockTimestamp: timestampMap.get(log.blockNumber?.toString()) ?? null }));
 }
 
-// async function addTimestampsToLogs(logs) {
-//   const uniqueBlocks = Array.from(
-//     new Set(logs.map((log) => log.blockNumber?.toString()).filter(Boolean))
-//   );
-//   const blocks = await Promise.all(
-//     uniqueBlocks.map((blockNumber) =>
-//       publicClient.getBlock({ blockNumber: BigInt(blockNumber) })
-//     )
-//   );
-//   const timestampMap = new Map(
-//     blocks.map((block) => [block.number.toString(), Number(block.timestamp)])
-//   );
-//   return logs.map((log) => ({
-//     ...log,
-//     timestamp: timestampMap.get(log.blockNumber?.toString()) ?? null
-//   }));
-// }
-
-// function formatEndDate(timestamp, biddingTime) {
-//   if (!timestamp || !biddingTime) return { value: "N/A", endSeconds: null };
-//   const endSeconds = Number(timestamp) + Number(biddingTime);
-//   const date = new Date(endSeconds * 1000);
-//   const year = date.getFullYear();
-//   const month = String(date.getMonth() + 1).padStart(2, "0");
-//   const day = String(date.getDate()).padStart(2, "0");
-//   let hours = date.getHours();
-//   const minutes = String(date.getMinutes()).padStart(2, "0");
-//   const seconds = String(date.getSeconds()).padStart(2, "0");
-//   const period = hours >= 12 ? "PM" : "AM";
-//   hours = hours % 12;
-//   if (hours === 0) hours = 12;
-//   const hourStr = String(hours).padStart(2, "0");
-//   return {
-//     value: `${year}-${month}-${day} ${hourStr}:${minutes}:${seconds} ${period}`,
-//     endSeconds
-//   };
-// }
-
 async function resolveDeploymentBlock(chainConfig) {
   if (chainConfig.hash) {
     const receipt = await publicClient.getTransactionReceipt({
@@ -623,45 +585,6 @@ async function refreshOrders() {
   ordersPagination.hidden = ordersTotalPages <= 1;
   renderOrdersPage(getPageFromUrl());
 }
-
-
-// async function hydrateAuctionState(rows) {
-//   const results = await Promise.all(
-//     rows.map(async (row) => {
-//       try {
-//         const [highestBidder, highestBid, pendingReturns] = await Promise.all([
-//           publicClient.readContract({
-//             address: getAddress(row.auction),
-//             abi: ABI_AUCTION_READ,
-//             functionName: "highestBidder"
-//           }),
-//           publicClient.readContract({
-//             address: getAddress(row.auction),
-//             abi: ABI_AUCTION_READ,
-//             functionName: "highestBid"
-//           }),
-//           currentAccount
-//             ? publicClient.readContract({
-//                 address: getAddress(row.auction),
-//                 abi: ABI_AUCTION_READ,
-//                 functionName: "pendingReturns",
-//                 args: [currentAccount]
-//               })
-//             : Promise.resolve(0n)
-//         ]);
-//         return {
-//           ...row,
-//           highestBidder,
-//           highestBid: highestBid ? formatEther(highestBid) : null,
-//           pendingReturns: pendingReturns ?? 0n
-//         };
-//       } catch (error) {
-//         return { ...row, highestBidder: null, highestBid: null, pendingReturns: 0n };
-//       }
-//     })
-//   );
-//   return results;
-// }
 
 async function connectWallet() {
   if (isConnected) {
@@ -823,275 +746,25 @@ async function signOrderWithEIP712(
   }
 }
 
-// async function refreshAuctions() {
-//   if (!isConnected || !configCache || !currentChainId) return;
-//   const chainConfig = configCache[String(currentChainId)];
-//   if (!chainConfig || !chainConfig.address) return;
-//   const deploymentBlock = await resolveDeploymentBlock(chainConfig);
-//   const logs = await fetchEvents(chainConfig.address, deploymentBlock);
-//   const logsWithTimestamps = await addTimestampsToLogs(logs);
-//   allRows = logsWithTimestamps.map((log) => {
-//     const endInfo = formatEndDate(log.timestamp, log.args.biddingTime);
-//     return {
-//       auction: log.args.auction,
-//       owner: log.args.owner,
-//       label: log.args.label,
-//       endDate: endInfo.value,
-//       endSeconds: endInfo.endSeconds
-//     };
-//   });
-//   allRows = await hydrateAuctionState(allRows);
-//   if (!allRows.length) {
-//     setMessage("No auctions have been deployed yet.");
-//     grid.hidden = true;
-//     pagination.hidden = true;
-//     return;
-//   }
-//   totalPages = Math.max(1, Math.ceil(allRows.length / PAGE_SIZE));
-//   pagination.hidden = totalPages <= 1;
-//   grid.hidden = false;
-//   renderPage(getPageFromUrl());
-// }
-
-// prevPage.addEventListener("click", () => {
-//   const current = getPageFromUrl();
-//   renderPage(current - 1);
-// });
-
-// nextPage.addEventListener("click", () => {
-//   const current = getPageFromUrl();
-//   renderPage(current + 1);
-// });
-
-// networkSelect.addEventListener("change", async (event) => {
-//   if (!window.ethereum) {
-//     setMessage("No wallet detected. Install MetaMask or another provider.", "warn");
-//     return;
-//   }
-//   const chainId = event.target.value;
-//   if (!chainId) return;
-//   try {
-//     await walletClient.switchChain({
-//       id: Number(chainId)
-//     });
-//   } catch (error) {
-//     if (error && error.code === 4902) {
-//       setMessage("This network is not available in your wallet.");
-//       return;
-//     }
-//     setMessage(`Error: ${error.message}`);
-//   }
-// });
-
-// createAuctionButton.addEventListener("click", () => {
-//   if (!isConnected) {
-//     setMessage("Connect your wallet to create an auction.");
-//     return;
-//   }
-//   grid.hidden = true;
-//   pagination.hidden = true;
-//   auctionForm.reset();
-//   auctionModal.hidden = false;
-// });
-
-// refreshButton.addEventListener("click", async () => {
-//   if (!isConnected) {
-//     setMessage("Connect your wallet to refresh auctions.");
-//     return;
-//   }
-//   setMessage("Refreshing auctions...");
-//   await refreshAuctions();
-// });
-
-// cancelForm.addEventListener("click", () => {
-//   auctionModal.hidden = true;
-//   grid.hidden = !allRows.length;
-//   pagination.hidden = totalPages <= 1;
-// });
-
-// closeAuctionModal.addEventListener("click", () => {
-//   auctionModal.hidden = true;
-//   grid.hidden = !allRows.length;
-//   pagination.hidden = totalPages <= 1;
-// });
-
-// auctionForm.addEventListener("submit", async (event) => {
-//   event.preventDefault();
-//   if (!isConnected || !configCache || !currentChainId) return;
-//   const chainConfig = configCache[String(currentChainId)];
-//   if (!chainConfig || !chainConfig.address) {
-//     setMessage("This app has not been deployed on the connected chain.");
-//     return;
-//   }
-
-//   const label = auctionLabel.value.trim();
-//   const durationDays = Number(auctionDuration.value);
-//   if (!label) {
-//     setMessage("Label is required.");
-//     return;
-//   }
-//   if (!Number.isFinite(durationDays) || durationDays <= 0) {
-//     setMessage("Duration must be a positive number of days.");
-//     return;
-//   }
-
-//   try {
-//     setMessage("Submitting transaction...");
-//     const biddingTime = BigInt(Math.floor(durationDays * 24 * 60 * 60));
-//     const chain = getChainById(currentChainId);
-//     const hash = await walletClient.writeContract({
-//       account: currentAccount,
-//       address: getAddress(chainConfig.address),
-//       abi: ABI_CREATE,
-//       functionName: "createAuction",
-//       args: [label, biddingTime],
-//       chain: chain ?? undefined,
-//       gas: await estimateGasForContract({
-//         address: chainConfig.address,
-//         abi: ABI_CREATE,
-//         functionName: "createAuction",
-//         args: [label, biddingTime]
-//       })
-//     });
-
-//     const explorer = getExplorerBase(currentChainId);
-//     const link = explorer ? `${explorer}/tx/${hash}` : null;
-
-//     const shortHash = `${hash.slice(0, 6)}...${hash.slice(-4)}`;
-//     txBody.innerHTML = link
-//       ? `Transaction confirmed. Hash: <a href="${link}" target="_blank" rel="noreferrer">${shortHash}</a>`
-//       : `Transaction confirmed. Hash: ${shortHash}`;
-//     txModal.hidden = false;
-
-//     auctionForm.reset();
-//     auctionModal.hidden = true;
-//   } catch (error) {
-//     setMessage(`Error: ${error.message}`);
-//   }
-// });
-
-// closeModal.addEventListener("click", async () => {
-//   txModal.hidden = true;
-//   await refreshAuctions();
-// });
-
-// closeBidModal.addEventListener("click", () => {
-//   bidModal.hidden = true;
-//   currentBidAuction = null;
-// });
-
-// gridBody.addEventListener("click", (event) => {
-//   const button = event.target.closest(".bid-btn");
-//   if (!button) return;
-//   const auction = button.getAttribute("data-auction");
-//   if (!auction) return;
-//   currentBidAuction = auction;
-//   bidForm.reset();
-//   bidModal.hidden = false;
-// });
-
-// bidForm.addEventListener("submit", async (event) => {
-//   event.preventDefault();
-//   if (!currentBidAuction || !currentAccount) return;
-//   const valueEth = bidValue.value.trim();
-//   if (!valueEth || Number(valueEth) <= 0) {
-//     setMessage("Bid value must be greater than 0.");
-//     return;
-//   }
-//   try {
-//     setMessage("Submitting bid...");
-//     const chain = getChainById(currentChainId);
-//     const hash = await walletClient.writeContract({
-//       account: currentAccount,
-//       address: getAddress(currentBidAuction),
-//       abi: ABI_AUCTION_BID,
-//       functionName: "bid",
-//       value: parseEther(valueEth),
-//       chain: chain ?? undefined,
-//       gas: await estimateGasForContract({
-//         address: currentBidAuction,
-//         abi: ABI_AUCTION_BID,
-//         functionName: "bid",
-//         value: parseEther(valueEth)
-//       })
-//     });
-//     const link = currentExplorerBase
-//       ? `${currentExplorerBase}/tx/${hash}`
-//       : null;
-//     const shortHash = `${hash.slice(0, 6)}...${hash.slice(-4)}`;
-//     txBody.innerHTML = link
-//       ? `Transaction confirmed. Hash: <a href="${link}" target="_blank" rel="noreferrer">${shortHash}</a>`
-//       : `Transaction confirmed. Hash: ${shortHash}`;
-//     txModal.hidden = false;
-//     bidModal.hidden = true;
-//     currentBidAuction = null;
-//     await refreshAuctions();
-//   } catch (error) {
-//     setMessage(`Error: ${error.message}`);
-//   }
-// });
-
-// gridBody.addEventListener("click", async (event) => {
-//   const withdraw = event.target.closest(".withdraw-btn");
-//   const end = event.target.closest(".end-btn");
-//   if (!withdraw && !end) return;
-//   const auction = (withdraw ?? end).getAttribute("data-auction");
-//   if (!auction || !currentAccount) return;
-//   try {
-//     const chain = getChainById(currentChainId);
-//     if (withdraw) {
-//       setMessage("Submitting withdraw...");
-//       const hash = await walletClient.writeContract({
-//         account: currentAccount,
-//         address: getAddress(auction),
-//         abi: ABI_AUCTION_WITHDRAW,
-//         functionName: "withdraw",
-//         chain: chain ?? undefined,
-//         gas: await estimateGasForContract({
-//           address: auction,
-//           abi: ABI_AUCTION_WITHDRAW,
-//           functionName: "withdraw"
-//         })
-//       });
-//       const link = currentExplorerBase
-//         ? `${currentExplorerBase}/tx/${hash}`
-//         : null;
-//       const shortHash = `${hash.slice(0, 6)}...${hash.slice(-4)}`;
-//       txBody.innerHTML = link
-//         ? `Transaction confirmed. Hash: <a href="${link}" target="_blank" rel="noreferrer">${shortHash}</a>`
-//         : `Transaction confirmed. Hash: ${shortHash}`;
-//       txModal.hidden = false;
-//       await refreshAuctions();
-//       return;
-//     }
-//     if (end) {
-//       setMessage("Ending auction...");
-//       const hash = await walletClient.writeContract({
-//         account: currentAccount,
-//         address: getAddress(auction),
-//         abi: ABI_AUCTION_END,
-//         functionName: "endAuction",
-//         chain: chain ?? undefined,
-//         gas: await estimateGasForContract({
-//           address: auction,
-//           abi: ABI_AUCTION_END,
-//           functionName: "endAuction"
-//         })
-//       });
-//       const link = currentExplorerBase
-//         ? `${currentExplorerBase}/tx/${hash}`
-//         : null;
-//       const shortHash = `${hash.slice(0, 6)}...${hash.slice(-4)}`;
-//       txBody.innerHTML = link
-//         ? `Transaction confirmed. Hash: <a href="${link}" target="_blank" rel="noreferrer">${shortHash}</a>`
-//         : `Transaction confirmed. Hash: ${shortHash}`;
-//       txModal.hidden = false;
-//       await refreshAuctions();
-//     }
-//   } catch (error) {
-//     setMessage(`Error: ${error.message}`);
-//   }
-// });
+networkSelect.addEventListener("change", async (event) => {
+  if (!window.ethereum) {
+    setMessage("No wallet detected. Install MetaMask or another provider.", "warn");
+    return;
+  }
+  const chainId = event.target.value;
+  if (!chainId) return;
+  try {
+    await walletClient.switchChain({
+      id: Number(chainId)
+    });
+  } catch (error) {
+    if (error && error.code === 4902) {
+      setMessage("This network is not available in your wallet.");
+      return;
+    }
+    setMessage(`Error: ${error.message}`);
+  }
+});
 
 // duration toggle helper
 function updateDurationInputs() {
