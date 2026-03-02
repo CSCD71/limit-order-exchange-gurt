@@ -242,10 +242,10 @@ describe("Exchange", function () {
             receipt = await client.waitForTransactionReceipt({ hash });
             receipts.push({label: "Sell Order", receipt});
 
-            // Approve the exchange contract to transfer tokens on behalf of buyer1
-            await buyer1.writeContract({ address: tokenAddresses[0], abi: tokenABIs[0], functionName: "approve", args: [contract.address, parseEther("1")] });
-            // and on behalf of seller1
-            await seller1.writeContract({ address: tokenAddresses[1], abi: tokenABIs[1], functionName: "approve", args: [contract.address, parseEther("1")] });
+            // Approve the exchange contract to transfer tokens on behalf of seller1
+            await seller1.writeContract({ address: tokenAddresses[0], abi: tokenABIs[0], functionName: "approve", args: [contract.address, parseEther("1")] });
+            // and on behalf of buyer1
+            await buyer1.writeContract({ address: tokenAddresses[1], abi: tokenABIs[1], functionName: "approve", args: [contract.address, parseEther("1")] });
             // Create buy order
             const hash2 = await buyer1.writeContract({ address, abi, functionName: "fillOrder", args: [seller1.account.address, tokenAddresses[0], tokenAddresses[1], parseEther("1"), parseEther("1"), currentTime + time, nonce, signature, parseEther("1")] });
             receipt2 = await client.waitForTransactionReceipt({ hash: hash2 });
@@ -264,159 +264,87 @@ describe("Exchange", function () {
     });
 
     describe("Partial Buy Order", function (){
-
+        // Make after fixing partial buy order math
     });
 
     describe("Bulk Buy Order", function (){
-
+        // Make after implementing Bulk Buy Order functionality
     });
 
     describe("Overpay Buy Order", function (){
-
+        // Make after finding out what happens if overpay (try to buy too much)
     });
 
     describe("Expired Buy Order", function (){
+        let receipt;
+        let receipt2;
+        let receipt3;
+        let signature;
+        const time = BigInt(60);
+        const nonce = getNonce();
+        beforeAll(async () => {
+            // Mint tokens to seller1 and buyer1
+            await seller1.writeContract({ address: tokenAddresses[0], abi: tokenABIs[0], functionName: "mint", args: [seller1.account.address, parseEther("1")] });
+            await buyer1.writeContract({ address: tokenAddresses[1], abi: tokenABIs[1], functionName: "mint", args: [buyer1.account.address, parseEther("1")] });
+            signature = await signOrderWithEIP712(
+                tokenAddresses[0],
+                tokenAddresses[1],
+                parseEther("1"),
+                parseEther("1"),
+                currentTime + time,
+                nonce,
+                seller1,
+                contract.address,
+                foundry.id
+            );
+            const { address, abi } = contract;
+            const hash = await seller1.writeContract({ address, abi, functionName: "createOrder", args: [tokenAddresses[0], tokenAddresses[1], parseEther("1"), parseEther("1"), currentTime + time, nonce, signature, true] });
+            receipt = await client.waitForTransactionReceipt({ hash });
+            receipts.push({label: "Sell Order", receipt});
 
+            // Approve the exchange contract to transfer tokens on behalf of seller1
+            await seller1.writeContract({ address: tokenAddresses[0], abi: tokenABIs[0], functionName: "approve", args: [contract.address, parseEther("1")] });
+        });
+        it("Should not allow expired orders to be filled", async function () {
+            // increase blockchain time by one year
+            await client.request({ method: "anvil_increaseTime", params: [BigInt(60) + 1n], });
+            // mine 1 block
+            await client.request({method: "anvil_mine", params: [1] });
+            // approve buyer1 spending
+            await buyer1.writeContract({ address: tokenAddresses[1], abi: tokenABIs[1], functionName: "approve", args: [contract.address, parseEther("1")] });
+            // Create buy order
+            const hash2 = await buyer1.writeContract({ address, abi, functionName: "fillOrder", args: [seller1.account.address, tokenAddresses[0], tokenAddresses[1], parseEther("1"), parseEther("1"), currentTime + time, nonce, signature, parseEther("1")] });
+            await expect(hash2).rejects.toThrow("Order has expired");
+        });
+        it("Should not allow fulfillment of old order after new order is made", async function () {
+            const nonce2 = getNonce();
+            const signature2 = await signOrderWithEIP712(
+                tokenAddresses[0],
+                tokenAddresses[1],
+                parseEther("1"),
+                parseEther("1"),
+                currentTime + time + 1n,
+                nonce2,
+                seller1,
+                contract.address,
+                foundry.id
+            );
+            const { address, abi } = contract;
+            const hash = await seller1.writeContract({ address, abi, functionName: "createOrder", args: [tokenAddresses[0], tokenAddresses[1], parseEther("1"), parseEther("1"), currentTime + time + 1n, nonce2, signature2, true] });
+            receipt2 = await client.waitForTransactionReceipt({ hash });
+            receipts.push({label: "Sell Order", receipt: receipt2});
+
+            // Approve the exchange contract to transfer tokens on behalf of seller1
+            await seller1.writeContract({ address: tokenAddresses[0], abi: tokenABIs[0], functionName: "approve", args: [contract.address, parseEther("1")] });
+            // approve buyer1 spending
+            await buyer1.writeContract({ address: tokenAddresses[1], abi: tokenABIs[1], functionName: "approve", args: [contract.address, parseEther("1")] });
+            // Create buy order
+            const hash2 = await buyer1.writeContract({ address, abi, functionName: "fillOrder", args: [seller1.account.address, tokenAddresses[0], tokenAddresses[1], parseEther("1"), parseEther("1"), currentTime + time, nonce, signature, parseEther("1")] });
+            await expect(hash2).rejects.toThrow("Order is inactive");
+        });
     });
 
     describe("Cancel Sell Order", function (){
 
     });
-    
-    describe("First Bid", function () {
-        /*
-        let receipt;
-      
-        beforeAll(async () => {
-            const { address, abi } = contract;
-            const hash = await buyer1.writeContract({ address, abi, functionName: "bid", value: firstBid });
-            receipt = await client.waitForTransactionReceipt({ hash });
-            receipts.push({label: "Bidding 1", receipt});
-        }); 
-        
-        it("Should have the right balance", async function () {
-            const { address, value } = contract;
-            const balance = await client.getBalance({address});
-            expect(balance).to.equal(firstBid);
-    	}); 
-        
-        it("Should have emitted an event after bidding", async function () { 
-             const { abi } = contract;
-            // check the logs looking of events
-            expect(receipt.logs).toHaveLength(1);
-            const log = receipt.logs[0];
-            // parse and check event
-            const { args, eventName } = decodeEventLog({abi, data: log.data, topics: log.topics });
-            expect(eventName).to.equal('BidPlaced');
-            expect(args.bidder).to.equal(buyer1.account.address);
-            expect(args.amount).to.equal(firstBid);
-        });
-      
-        it("Should have set the highestBidder", async function () {
-              const { address, abi, args } = contract;
-              const highestBidder = await client.readContract({ address, abi, functionName: "highestBidder" });
-              expect(highestBidder).to.equal(buyer1.account.address);
-        });
-
-        it("Should have set the highestBid", async function () {
-              const { address, abi, args } = contract;
-              const highestBid = await client.readContract({ address, abi, functionName: "highestBid" });
-              expect(highestBid).to.equal(firstBid);
-        });
-        */
-    });
-
-
-    describe("Second Bid", function () {
-      /*
-      it("Should reject a bid lower than or equal to the current highest bid", async function () {
-          const { address, abi } = contract;
-          const request = buyer2.writeContract({ address, abi, functionName: "bid", value: firstBid });
-          await expect(request).rejects.toThrow("There already is a higher bid.");
-      });
-
-      it("Should accept a bid higher than the current highest bid", async function () {
-          const { address, abi } = contract;
-          const hash = await buyer2.writeContract({ address, abi, functionName: "bid", value: secondBid });
-          const receipt = await client.waitForTransactionReceipt({ hash });
-          receipts.push({label: "Bidding 2", receipt});
-      });
-      */
-    });
-    
-    describe("Withdraw", function () {
-        /*
-        it("Should allow bidders to withdraw their pending returns", async function () {
-            const { address, abi } = contract;
-            const before = await client.getBalance({ address: buyer1.account.address });
-            const hash = await buyer1.writeContract({ address, abi, functionName: "withdraw" });
-            const receipt = await client.waitForTransactionReceipt({ hash });
-            receipts.push({label: "Withdraw", receipt});
-            const gasCost = receipt.gasUsed * receipt.effectiveGasPrice;
-            const after = await client.getBalance({ address: buyer1.account.address });
-            const netReceived = (after - before) + gasCost;
-            expect(netReceived).toBe(firstBid);
-        });
-        
-        it("Should not allow the highest bidder to withdraw", async function () {
-            const { address, abi } = contract;
-            const request = buyer2.writeContract({ address, abi, functionName: "withdraw" });
-            await expect(request).rejects.toThrow("No funds to withdraw.");
-        });
-        */
-    });
-    
-    describe("End Auction (present)", function () {
-        /*
-        it("Should not allow to call endAuction before the end", async function () {
-            const { address, abi } = contract;
-            const request = buyer2.writeContract({ address, abi, functionName: "endAuction" });
-            await expect(request).rejects.toThrow("Auction not yet ended.");
-        });
-        */
-    });
-    
-    describe("End Auction (future)", function () {
-        /*
-        let before, receipt;
-        
-        beforeAll(async () => {
-            // increase blockchain time by one year
-            await client.request({ method: "anvil_increaseTime", params: [biddingTime+1n], });
-            // mine 1 block
-            await client.request({method: "anvil_mine", params: [1] });
-            // endAuction
-            const { address, abi } = contract;
-            before = await client.getBalance({ address: seller1.account.address });
-            const hash = await seller1.writeContract({ address, abi, functionName: "endAuction" });
-            receipt = await client.waitForTransactionReceipt({ hash });
-            receipts.push({label: "End Auction", receipt});
-        })
-        
-    	it("Should have the ended being true", async function () {
-            const { address, abi, args } = contract;
-            const ended = await client.readContract({ address, abi, functionName: "ended" });
-            expect(ended).to.equal(true);
-    	});
-        
-        it("Should have refunded the seller1", async function () {            
-            const gasCost = receipt.gasUsed * receipt.effectiveGasPrice;
-            const after = await client.getBalance({ address: seller1.account.address });
-            const netReceived = (after - before) + gasCost;
-            expect(netReceived).toBe(secondBid);
-        });
-        
-        it("Should have emitted an event", async function () {            
-            const { abi } = contract;
-           // check the logs looking of events
-           expect(receipt.logs).toHaveLength(1);
-           const log = receipt.logs[0];
-           // parse and check event
-           const { args, eventName } = decodeEventLog({abi, data: log.data, topics: log.topics });
-           expect(eventName).to.equal('AuctionEnded');
-           expect(args.winner).to.equal(buyer2.account.address);
-           expect(args.amount).to.equal(secondBid);
-        });
-        */
-    });	
 });
