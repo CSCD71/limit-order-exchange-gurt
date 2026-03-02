@@ -48,6 +48,28 @@ const ABI_FILL_ORDER = [
     outputs: [{ type: "bool" },]
   }
 ];
+const ERC20_ABI = [
+  {
+    type: "function",
+    name: "allowance",
+    stateMutability: "view",
+    inputs: [
+      { name: "owner", type: "address" },
+      { name: "spender", type: "address" }
+    ],
+    outputs: [{ name: "", type: "uint256" }]
+  },
+  {
+    type: "function",
+    name: "approve",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "spender", type: "address" },
+      { name: "amount", type: "uint256" }
+    ],
+    outputs: [{ name: "", type: "bool" }]
+  }
+];
 
 const connectButton = document.getElementById("connectButton");
 const networkSelect = document.getElementById("networkSelect");
@@ -65,6 +87,33 @@ const durationAbsolute = document.getElementById("durationAbsolute");
 const txModal = document.getElementById("txModal");
 const closeModal = document.getElementById("closeModal");
 const txBody = document.getElementById("txBody");
+
+// order browsing/filling UI elements
+const ordersGrid = document.getElementById("ordersGrid");
+const ordersGridBody = document.getElementById("ordersGridBody");
+const ordersPrev = document.getElementById("ordersPrev");
+const ordersNext = document.getElementById("ordersNext");
+const ordersPageInfo = document.getElementById("ordersPageInfo");
+const ordersMessage = document.getElementById("ordersMessage");
+const ordersPagination = document.getElementById("ordersPagination");
+const ordersRefresh = document.getElementById("ordersRefresh");
+const tabsNav = document.querySelector(".tabs-nav");
+const tabPanels = document.querySelectorAll(".tab-panel");
+const walletGate = document.getElementById("walletGate");
+
+const orderOverviewMessage = document.getElementById("orderOverviewMessage");
+const orderOverviewForm = document.getElementById("orderOverviewForm");
+const ovSeller = document.getElementById("ovSeller");
+const ovTokenA = document.getElementById("ovTokenA");
+const ovTokenB = document.getElementById("ovTokenB");
+const ovAmountA = document.getElementById("ovAmountA");
+const ovAmountB = document.getElementById("ovAmountB");
+// deadline inputs in overview: unix + datetime-local
+const ovDeadlineUnix = document.getElementById("ovDeadlineUnix");
+const ovDeadlineDatetime = document.getElementById("ovDeadlineDatetime");
+const ovNonce = document.getElementById("ovNonce");
+const ovSignature = document.getElementById("ovSignature");
+const ovOffer = document.getElementById("ovOffer");
 
 // -----------------------------------------------------------------------------
 // token support for arbitrary ERC‑20s
@@ -130,6 +179,72 @@ function handleCustomTokenSelection(event) {
 fromToken?.addEventListener("change", handleCustomTokenSelection);
 toToken?.addEventListener("change", handleCustomTokenSelection);
 
+// sync overview deadline inputs: datetime-local <-> unix
+if (ovDeadlineDatetime && ovDeadlineUnix) {
+  ovDeadlineDatetime.addEventListener("change", () => {
+    const v = ovDeadlineDatetime.value;
+    if (!v) {
+      ovDeadlineUnix.value = "";
+      return;
+    }
+    const t = new Date(v);
+    if (isNaN(t.getTime())) return;
+    ovDeadlineUnix.value = String(Math.floor(t.getTime() / 1000));
+  });
+
+  ovDeadlineUnix.addEventListener("input", () => {
+    const v = Number(ovDeadlineUnix.value);
+    if (!Number.isFinite(v) || v <= 0) {
+      ovDeadlineDatetime.value = "";
+      return;
+    }
+    const dt = new Date(v * 1000);
+    const pad = (n) => String(n).padStart(2, "0");
+    ovDeadlineDatetime.value = `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+  });
+}
+
+
+// ============================================================================
+// TAB SYSTEM
+// ============================================================================
+/**
+ * Initialize tab navigation system.
+ * Allows for flexible, extensible tab switching capability.
+ * New tabs can be added by:
+ * 1. Adding a tab button with class "tab-btn" and data-tab attribute
+ * 2. Adding a corresponding section with class "tab-panel" and matching data-tab
+ * 3. No JS changes needed
+ */
+function initializeTabs() {
+  const tabButtons = document.querySelectorAll(".tab-btn");
+  const tabPanels = document.querySelectorAll(".tab-panel");
+
+  tabButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const tabName = button.getAttribute("data-tab");
+      if (!tabName) return;
+
+      // Deactivate all buttons and panels
+      tabButtons.forEach((btn) => btn.classList.remove("active"));
+      tabPanels.forEach((panel) => panel.classList.remove("active"));
+
+      // Activate clicked button and corresponding panel
+      button.classList.add("active");
+      const activePanel = document.querySelector(
+        `.tab-panel[data-tab="${tabName}"]`
+      );
+      if (activePanel) {
+        activePanel.classList.add("active");
+      }
+    });
+  });
+}
+
+// wire up token selectors after DOM is ready
+fromToken?.addEventListener("change", handleCustomTokenSelection);
+toToken?.addEventListener("change", handleCustomTokenSelection);
+
 
 let isConnected = false;
 let configCache = null;
@@ -139,6 +254,11 @@ let currentChainId = null;
 let currentAccount = null;
 let currentExplorerBase = null;
 let orderNonce = 67n;
+
+// browsing / filling orders state
+let ordersRows = [];
+let ordersTotalPages = 1;
+let currentOrdersPage = 1;
 
 function setMessage(text, tone = "info") {
   message.textContent = text;
@@ -150,6 +270,35 @@ function formatAddress(value) {
   return `${value.slice(0, 6)}...${value.slice(-4)}`;
 }
 
+function formatUnixToLocal(unix) {
+  try {
+    const n = Number(unix);
+    if (!Number.isFinite(n) || n <= 0) return "N/A";
+    return new Date(n * 1000).toLocaleString();
+  } catch (_) {
+    return "N/A";
+  }
+}
+
+function formatNumber(n) {
+  try {
+    return new Intl.NumberFormat().format(Number(n.toString()));
+  } catch (_) {
+    return n.toString();
+  }
+}
+
+function setWalletUiState(connected) {
+  if (tabsNav) tabsNav.hidden = !connected;
+  tabPanels.forEach((panel) => {
+    panel.hidden = !connected;
+  });
+  if (walletGate) walletGate.hidden = connected;
+  if (!connected) {
+    contractLink.hidden = true;
+  }
+}
+
 function resetUi() {
   isConnected = false;
   connectButton.textContent = "Connect Wallet";
@@ -157,6 +306,8 @@ function resetUi() {
   setMessage("Please connect your wallet first.");
   currentExplorerBase = null;
   currentAccount = null;
+  if (ordersRefresh) ordersRefresh.disabled = true;
+  setWalletUiState(false);
 }
 
 async function loadConfig() {
@@ -264,6 +415,18 @@ async function fetchEvents(contractAddress, fromBlock) {
   });
 }
 
+// attach block timestamps to logs so we can show human-readable times
+async function addTimestampsToLogs(logs) {
+  const uniqueBlocks = Array.from(
+    new Set(logs.map((l) => l.blockNumber?.toString()).filter(Boolean))
+  );
+  const blocks = await Promise.all(
+    uniqueBlocks.map((bn) => publicClient.getBlock({ blockNumber: BigInt(bn) }))
+  );
+  const timestampMap = new Map(blocks.map((b) => [b.number.toString(), Number(b.timestamp)]));
+  return logs.map((log) => ({ ...log, blockTimestamp: timestampMap.get(log.blockNumber?.toString()) ?? null }));
+}
+
 // async function addTimestampsToLogs(logs) {
 //   const uniqueBlocks = Array.from(
 //     new Set(logs.map((log) => log.blockNumber?.toString()).filter(Boolean))
@@ -302,15 +465,15 @@ async function fetchEvents(contractAddress, fromBlock) {
 //   };
 // }
 
-// async function resolveDeploymentBlock(chainConfig) {
-//   if (chainConfig.hash) {
-//     const receipt = await publicClient.getTransactionReceipt({
-//       hash: chainConfig.hash
-//     });
-//     return Number(receipt.blockNumber);
-//   }
-//   return Number(chainConfig.deploymentBlock ?? 0);
-// }
+async function resolveDeploymentBlock(chainConfig) {
+  if (chainConfig.hash) {
+    const receipt = await publicClient.getTransactionReceipt({
+      hash: chainConfig.hash
+    });
+    return Number(receipt.blockNumber);
+  }
+  return Number(chainConfig.deploymentBlock ?? 0);
+}
 
 async function estimateGasForContract({
   address,
@@ -330,6 +493,137 @@ async function estimateGasForContract({
     chain: chain ?? undefined
   });
 }
+
+// ----- order browsing helpers ------------------------------------------------
+
+function getPageFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const page = Number(params.get("page"));
+  if (Number.isNaN(page) || page < 1) return 1;
+  return page;
+}
+
+function updateUrl(page) {
+  const params = new URLSearchParams(window.location.search);
+  params.set("page", String(page));
+  const newUrl = `${window.location.pathname}?${params.toString()}`;
+  window.history.pushState({ page }, "", newUrl);
+}
+
+// calculate number of pages based on the global ordersRows array
+function computeOrderPagination() {
+  ordersTotalPages = Math.max(1, Math.ceil(ordersRows.length / PAGE_SIZE));
+  if (currentOrdersPage > ordersTotalPages) currentOrdersPage = ordersTotalPages;
+}
+
+function renderOrdersPage(page) {
+  computeOrderPagination();
+  currentOrdersPage = Math.min(Math.max(1, page), ordersTotalPages);
+  const start = (currentOrdersPage - 1) * PAGE_SIZE;
+  const slice = ordersRows.slice(start, start + PAGE_SIZE);
+  ordersGridBody.innerHTML = slice
+    .map((row, idx) => {
+      const p = start + idx;
+      return `
+        <div class="grid-row order-row" data-index="${p}">
+          <div title="${row.seller}">${formatAddress(row.seller)}</div>
+          <div title="${row.tokenA}">${formatAddress(row.tokenA)}</div>
+          <div title="${row.tokenB}">${formatAddress(row.tokenB)}</div>
+          <div>${formatNumber(row.amountA)}</div>
+          <div>${formatNumber(row.amountB)}</div>
+          <div title="${row.deadlineUnix}">${row.deadlineHuman} <small style="color:var(--muted);font-size:12px;display:block">${row.deadlineUnix}</small></div>
+        </div>
+      `;
+    })
+    .join("");
+  ordersPageInfo.textContent = `Page ${currentOrdersPage} of ${ordersTotalPages}`;
+  ordersPrev.disabled = currentOrdersPage <= 1;
+  ordersNext.disabled = currentOrdersPage >= ordersTotalPages;
+  updateUrl(currentOrdersPage);
+}
+
+function loadOrderIntoOverview(order) {
+  ovSeller.value = order.seller;
+  ovTokenA.value = order.tokenA;
+  ovTokenB.value = order.tokenB;
+  ovAmountA.value = order.amountA.toString();
+  ovAmountB.value = order.amountB.toString();
+  // populate both unix and datetime inputs
+  const unix = Number(order.deadline?.toString() ?? 0);
+  if (ovDeadlineUnix) ovDeadlineUnix.value = String(unix);
+  if (ovDeadlineDatetime) {
+    // convert to yyyy-MM-ddTHH:mm for datetime-local
+    const dt = unix > 0 ? new Date(unix * 1000) : null;
+    if (dt) {
+      const pad = (n) => String(n).padStart(2, "0");
+      const value = `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+      ovDeadlineDatetime.value = value;
+    } else {
+      ovDeadlineDatetime.value = "";
+    }
+  }
+  ovNonce.value = order.nonce.toString();
+  ovSignature.value = order.signature;
+  ovOffer.value = "";
+  orderOverviewMessage.textContent = "Order details populated; you may edit before filling.";
+}
+
+async function refreshOrders() {
+  if (!isConnected || !configCache || !currentChainId) return;
+  const chainConfig = configCache[String(currentChainId)];
+  if (!chainConfig || !chainConfig.address) return;
+  const deploymentBlock = await resolveDeploymentBlock(chainConfig);
+  const logs = await fetchEvents(chainConfig.address, deploymentBlock);
+  const logsWithTs = await addTimestampsToLogs(logs);
+  // convert logs to simple objects and filter active
+  const now = BigInt(Math.floor(Date.now() / 1000));
+  ordersRows = logsWithTs
+    .map((log) => {
+      const args = log.args;
+      const deadlineUnix = Number(args.deadline?.toString() ?? 0);
+      return {
+        blockNumber: log.blockNumber ?? 0n,
+        logIndex: Number(log.logIndex ?? 0),
+        seller: args.seller,
+        tokenA: args.tokenA,
+        tokenB: args.tokenB,
+        amountA: args.amountA,
+        amountB: args.amountB,
+        deadline: BigInt(args.deadline ?? 0),
+        deadlineUnix,
+        deadlineHuman: formatUnixToLocal(deadlineUnix),
+        blockTimestamp: log.blockTimestamp ?? null,
+        nonce: args.nonce,
+        signature: args.signature
+      };
+    })
+    .filter((o) => {
+      try {
+        return BigInt(o.deadline) > now;
+      } catch (_) {
+        return false;
+      }
+    })
+    .sort((a, b) => {
+      if (a.blockNumber === b.blockNumber) {
+        return b.logIndex - a.logIndex;
+      }
+      return a.blockNumber > b.blockNumber ? -1 : 1;
+    });
+  if (!ordersRows.length) {
+    ordersMessage.textContent = "No active orders posted yet.";
+    ordersGridBody.innerHTML = "";
+    ordersGrid.hidden = true;
+    ordersPagination.hidden = true;
+    return;
+  }
+  ordersMessage.textContent = "";
+  ordersGrid.hidden = false;
+  computeOrderPagination();
+  ordersPagination.hidden = ordersTotalPages <= 1;
+  renderOrdersPage(getPageFromUrl());
+}
+
 
 // async function hydrateAuctionState(rows) {
 //   const results = await Promise.all(
@@ -408,6 +702,7 @@ async function connectWallet() {
       orderForm.hidden = true;
       isConnected = true;
       connectButton.textContent = "Disconnect Wallet";
+      setWalletUiState(true);
       return;
     }
 
@@ -416,6 +711,10 @@ async function connectWallet() {
     setMessage("Ready to create an order.");
     isConnected = true;
     connectButton.textContent = "Disconnect Wallet";
+    if (ordersRefresh) ordersRefresh.disabled = false;
+    setWalletUiState(true);
+    // load orders for browsing
+    refreshOrders();
   } catch (error) {
     setMessage(`Error: ${error.message}`);
   } finally {
@@ -831,6 +1130,8 @@ networkSelect.addEventListener("change", async (event) => {
   } finally {
     // always refresh available tokens for the newly selected network
     populateTokenSelects(Number(chainId));
+    // and reload orders on new chain
+    refreshOrders();
   }
 });
 
@@ -878,17 +1179,6 @@ orderForm?.addEventListener("submit", async (event) => {
 
     // ensure the exchange contract is approved to transfer tokenA on behalf of user
     const chain = getChainById(currentChainId);
-    const ERC20_ABI = [
-      { type: "function", name: "allowance", stateMutability: "view", inputs: [
-          { name: "owner", type: "address" },
-          { name: "spender", type: "address" }
-        ], outputs: [{ name: "", type: "uint256" }] },
-      { type: "function", name: "approve", stateMutability: "nonpayable", inputs: [
-          { name: "spender", type: "address" },
-          { name: "amount", type: "uint256" }
-        ], outputs: [{ name: "", type: "bool" }] }
-    ];
-
     const spender = getAddress(chainConfig.address);
     // fetch current allowance
     const currentAllowance = await publicClient.readContract({
@@ -981,14 +1271,14 @@ orderForm?.addEventListener("submit", async (event) => {
       ? `Order created successfully!<br />Hash: <a href="${link}" target="_blank" rel="noreferrer">${shortHash}</a>`
       : `Order created successfully!<br />Hash: ${shortHash}`;
     bodyHtml += `<pre class="modal-body">` +
-      `seller: ${currentAccount}\n` +
-      `tokenA: ${tokenAAddr}\n` +
-      `tokenB: ${tokenBAddr}\n` +
-      `amountA: ${parsedAmountA.toString()}\n` +
-      `amountB: ${parsedAmountB.toString()}\n` +
-      `deadline: ${deadline.toString()}\n` +
-      `nonce: ${nonce.toString()}\n` +
-      `signature: ${signature}` +
+      `Seller: ${currentAccount}\n` +
+      `Token A: ${tokenAAddr}\n` +
+      `Token B: ${tokenBAddr}\n` +
+      `AmountA: ${parsedAmountA.toString()}\n` +
+      `AmountB: ${parsedAmountB.toString()}\n` +
+      `Deadline: ${deadline.toString()}\n` +
+      `Nonce: ${nonce.toString()}\n` +
+      `Signature: ${signature}` +
       `</pre>`;
     txBody.innerHTML = bodyHtml;
     txModal.hidden = false;
@@ -1000,14 +1290,129 @@ orderForm?.addEventListener("submit", async (event) => {
   }
 });
 
+// pagination controls for orders
+ordersPrev?.addEventListener("click", () => {
+  const current = getPageFromUrl();
+  renderOrdersPage(current - 1);
+});
+ordersNext?.addEventListener("click", () => {
+  const current = getPageFromUrl();
+  renderOrdersPage(current + 1);
+});
+ordersRefresh?.addEventListener("click", () => {
+  setMessage("Refreshing orders...");
+  refreshOrders();
+});
+
+// click a row to populate overview
+ordersGridBody?.addEventListener("click", (event) => {
+  const row = event.target.closest(".order-row");
+  if (!row) return;
+  const idx = Number(row.dataset.index);
+  const ord = ordersRows[idx];
+  if (ord) loadOrderIntoOverview(ord);
+});
+
+orderOverviewForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!isConnected || !configCache || !currentChainId || !currentAccount) {
+    orderOverviewMessage.textContent = "Connect wallet first.";
+    return;
+  }
+  try {
+    orderOverviewMessage.textContent = "Submitting fill transaction...";
+    const seller = ovSeller.value.trim();
+    const tokenA = ovTokenA.value.trim();
+    const tokenB = ovTokenB.value.trim();
+    const amountAVal = BigInt(ovAmountA.value.trim() || 0);
+    const amountBVal = BigInt(ovAmountB.value.trim() || 0);
+    const deadline = BigInt((ovDeadlineUnix?.value || "").trim() || 0);
+    const nonce = BigInt(ovNonce.value.trim() || 0);
+    const signature = ovSignature.value.trim();
+    const offer = BigInt(ovOffer.value.trim() || 0);
+    if (!seller || !tokenA || !tokenB || !signature || offer <= 0n) {
+      orderOverviewMessage.textContent = "Please supply all required fields and an offer > 0.";
+      return;
+    }
+
+    const chain = getChainById(currentChainId);
+    const spender = getAddress(configCache[String(currentChainId)].address);
+    const currentAllowance = await publicClient.readContract({
+      address: getAddress(tokenB),
+      abi: ERC20_ABI,
+      functionName: "allowance",
+      args: [currentAccount, spender]
+    });
+
+    if (currentAllowance < amountBVal) {
+      orderOverviewMessage.textContent = "Approving token transfer for fill order...";
+      try {
+        const approveHash = await walletClient.writeContract({
+          account: currentAccount,
+          address: getAddress(tokenB),
+          abi: ERC20_ABI,
+          functionName: "approve",
+          args: [spender, amountBVal],
+          chain: chain ?? undefined,
+          gas: await estimateGasForContract({
+            address: tokenB,
+            abi: ERC20_ABI,
+            functionName: "approve",
+            args: [spender, amountBVal]
+          })
+        });
+        const explorer = getExplorerBase(currentChainId);
+        const link = explorer ? `${explorer}/tx/${approveHash}` : null;
+        orderOverviewMessage.innerHTML = link
+          ? `Approval sent; tx <a href="${link}" target="_blank" rel="noreferrer">${approveHash.slice(0,6)}...${approveHash.slice(-4)}</a>. Submitting fill...`
+          : "Approval transaction sent. Submitting fill...";
+      } catch (error) {
+        throw new Error(`Approval failed: ${error.message}`);
+      }
+    }
+
+    orderOverviewMessage.textContent = "Submitting fill transaction...";
+    const hash = await walletClient.writeContract({
+      account: currentAccount,
+      address: getAddress(configCache[String(currentChainId)].address),
+      abi: ABI_FILL_ORDER,
+      functionName: "fillOrder",
+      args: [seller, tokenA, tokenB, amountAVal, amountBVal, deadline, nonce, signature, offer],
+      chain: chain ?? undefined,
+      gas: await estimateGasForContract({
+        address: configCache[String(currentChainId)].address,
+        abi: ABI_FILL_ORDER,
+        functionName: "fillOrder",
+        args: [seller, tokenA, tokenB, amountAVal, amountBVal, deadline, nonce, signature, offer]
+      })
+    });
+    const explorer = getExplorerBase(currentChainId);
+    const link = explorer ? `${explorer}/tx/${hash}` : null;
+    const shortHash = `${hash.slice(0, 6)}...${hash.slice(-4)}`;
+    txBody.innerHTML = link
+      ? `Transaction confirmed. Hash: <a href="${link}" target="_blank" rel="noreferrer">${shortHash}</a>`
+      : `Transaction confirmed. Hash: ${shortHash}`;
+    txModal.hidden = false;
+    orderOverviewMessage.textContent = "";
+  } catch (err) {
+    orderOverviewMessage.textContent = `Error: ${err.message}`;
+  }
+});
+
 closeModal.addEventListener("click", () => {
   txModal.hidden = true;
+  // refresh orders (and auctions if used)
+  refreshOrders();
 });
 
 connectButton.addEventListener("click", connectWallet);
 
 if (window.ethereum) {
   window.ethereum.on("accountsChanged", (accounts) => {
+    // reset any cached orders when the user swaps accounts
+    ordersRows = [];
+    ordersGridBody.innerHTML = "";
+    ordersMessage.textContent = "";
     if (!accounts || accounts.length === 0) {
       resetUi();
     } else if (isConnected) {
@@ -1017,6 +1422,10 @@ if (window.ethereum) {
   });
 
   window.ethereum.on("chainChanged", () => {
+    // clear orders and reset UI when the network flips
+    ordersRows = [];
+    ordersGridBody.innerHTML = "";
+    ordersMessage.textContent = "";
     if (isConnected) {
       resetUi();
       connectWallet();
@@ -1025,6 +1434,6 @@ if (window.ethereum) {
 }
 
 txModal.hidden = true;
-orderForm.hidden = true;
+initializeTabs();
 initNetworks();
 resetUi();

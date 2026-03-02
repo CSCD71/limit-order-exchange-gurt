@@ -138,6 +138,31 @@ body {
   padding: 32px 40px 80px;
 }
 
+.wallet-gate {
+  min-height: calc(67vh - 260px);
+  display: grid;
+  place-items: center;
+}
+
+.wallet-gate-card {
+  text-align: center;
+  max-width: 560px;
+  padding: 28px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  box-shadow: 0 22px 40px var(--shadow);
+}
+
+.wallet-gate-card h2 {
+  margin: 0 0 8px;
+}
+
+.wallet-gate-card p {
+  margin: 0;
+  color: var(--muted);
+}
+
 .contract-link {
   margin-bottom: 16px;
   padding: 12px 16px;
@@ -237,6 +262,51 @@ body {
   font-size: 14px;
 }
 
+/* orders application uses fewer columns; adapt layout */
+.orders-list .grid-row,
+.orders-list .grid-header {
+  grid-template-columns: 1.5fr 1.5fr 1.5fr 1fr 1fr 1fr;
+}
+
+.orders-list .grid-header {
+  display: grid;
+  gap: 12px;
+  padding: 12px 16px;
+  align-items: center;
+}
+
+.orders-list .grid-header > div {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* make order rows look cleaner and aligned with header */
+.orders-list .grid-row {
+  align-items: center;
+}
+
+.order-row {
+  transition: background 0.12s ease, transform 0.12s ease;
+}
+.order-row:hover {
+  background: linear-gradient(90deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+  transform: translateY(-2px);
+}
+
+.grid-row > div {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.grid-row small {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 4px;
+}
+
 .grid-row > div {
   display: flex;
   align-items: center;
@@ -327,6 +397,46 @@ body {
 
 .modal-body a {
   color: var(--accent);
+}
+
+/* Tab Navigation System */
+.tabs-nav {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 24px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0;
+}
+
+.tab-btn {
+  padding: 12px 24px;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  border-bottom: 3px solid transparent;
+  transition: color 0.2s ease, border-color 0.2s ease;
+  text-transform: capitalize;
+  letter-spacing: 0.3px;
+}
+
+.tab-btn:hover {
+  color: var(--text);
+}
+
+.tab-btn.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.tab-panel {
+  display: none;
+}
+
+.tab-panel.active {
+  display: block;
 }
 
 @media (max-width: 900px) {

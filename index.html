@@ -29,7 +29,22 @@
         Exchange contract deployed on
         <a id="contractLinkUrl" href="#" target="_blank" rel="noreferrer"></a>
       </div>
-      <section class="panel">
+
+      <section id="walletGate" class="wallet-gate" hidden>
+        <div class="wallet-gate-card">
+          <h2>Connect your wallet first</h2>
+          <p>Please connect your wallet to browse or create token exchange orders.</p>
+        </div>
+      </section>
+
+      <!-- Tab Navigation -->
+      <nav class="tabs-nav">
+        <button class="tab-btn active" data-tab="create">Create</button>
+        <button class="tab-btn" data-tab="browse">Browse</button>
+      </nav>
+
+      <!-- Create Tab Content -->
+      <section class="tab-panel panel active" data-tab="create" id="createPanel">
         <div class="panel-head" id="panelHead">
           <h2>Create Token Exchange Order</h2>
         </div>
@@ -73,6 +88,82 @@
             <button type="submit" class="btn">Create</button>
           </div>
         </form>
+      </section>
+
+      <!-- Browse Tab Content -->
+      <section class="tab-panel panel" data-tab="browse" id="browsePanel">
+        <div class="panel-head">
+          <h2>Browse &amp; Fill Orders</h2>
+        </div>
+        <div class="actions">
+          <button id="ordersRefresh" class="btn ghost">Refresh Orders</button>
+        </div>
+        <div class="orders-container" style="display:flex;gap:24px;flex-wrap:wrap;">
+          <!-- list of orders -->
+          <div class="orders-list" style="flex:1;min-width:300px;">
+            <div id="ordersMessage" class="message" role="status"> </div>
+            <div id="ordersGrid" class="grid">
+              <div class="grid-header">
+                <div>Seller</div><div>Token A</div><div>Token B</div><div>Amount A</div><div>Amount B</div><div>Deadline</div>
+              </div>
+              <div id="ordersGridBody"></div>
+            </div>
+            <div id="ordersPagination" class="pagination">
+              <button id="ordersPrev" class="btn ghost">Prev</button>
+              <span id="ordersPageInfo" class="page-info"></span>
+              <button id="ordersNext" class="btn ghost">Next</button>
+            </div>
+          </div>
+
+          <!-- overview / fill panel -->
+          <div class="orders-overview" style="flex:1;min-width:300px;">
+            <div id="orderOverviewMessage" class="message" role="status"></div>
+            <form id="orderOverviewForm" class="form">
+              <label class="field">
+                <span>Seller</span>
+                <input id="ovSeller" type="text" required />
+              </label>
+              <label class="field">
+                <span>Token A (You Receive)</span>
+                <input id="ovTokenA" type="text" required />
+              </label>
+              <label class="field">
+                <span>Token B (Seller Receives)</span>
+                <input id="ovTokenB" type="text" required />
+              </label>
+              <label class="field">
+                <span>Amount of Token A</span>
+                <input id="ovAmountA" type="number" min="0" required />
+              </label>
+              <label class="field">
+                <span>Amount of Token B</span>
+                <input id="ovAmountB" type="number" min="0" required />
+              </label>
+              <label class="field">
+                <span>Deadline</span>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                  <input id="ovDeadlineDatetime" type="datetime-local" />
+                  <input id="ovDeadlineUnix" type="number" min="0" placeholder="unix time equivalent" style="width:180px;" required />
+                </div>
+              </label>
+              <label class="field">
+                <span>Nonce</span>
+                <input id="ovNonce" type="number" min="0" required />
+              </label>
+              <label class="field">
+                <span>Signature</span>
+                <input id="ovSignature" rows="2" style="width:100%;" required>
+              </label>
+              <label class="field">
+                <span>Your offer (units of token A)</span>
+                <input id="ovOffer" type="number" min="0" required />
+              </label>
+              <div class="form-actions">
+                <button type="submit" class="btn">Fill Order</button>
+              </div>
+            </form>
+          </div>
+        </div>
       </section>
     </main>
 
