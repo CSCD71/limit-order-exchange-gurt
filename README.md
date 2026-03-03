@@ -8,7 +8,7 @@ Todo
 
 ## Link to Deployed Smart Contract
 
-Todo
+https://sepolia.etherscan.io/address/0xED4671fDEF0034F52830182870731BCa1B0f0ca2
 
 Note that the instructions are similar to that of Auction House
 (https://github.com/CSCD71/auction-house)
