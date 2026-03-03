@@ -3,11 +3,15 @@ import {
   createWalletClient,
   custom,
   getAddress,
-  parseAbiItem
+  parseAbiItem,
+  parseEther,
+  parseUnits,
+  formatUnits
 } from "https://esm.sh/viem@2.19.4";
 import * as chains from "https://esm.sh/viem@2.19.4/chains";
 
 const PAGE_SIZE = 6;
+const APPROVAL_DELAY_MS = 10_000;
 const ABI_EVENT = parseAbiItem(
   "event OrderPosted(address seller,address tokenA,address tokenB,uint256 amountA,uint256 amountB,uint256 deadline,uint256 nonce,bytes signature)"
 );
@@ -48,7 +52,32 @@ const ABI_FILL_ORDER = [
     outputs: [{ type: "bool" },]
   }
 ];
+const ABI_IS_FILLABLE = [
+  {
+    type: "function",
+    name: "isFillable",
+    stateMutability: "view",
+    inputs: [
+      { name: "seller", type: "address" },
+      { name: "tokenA", type: "address" },
+      { name: "tokenB", type: "address" },
+      { name: "amountA", type: "uint256" },
+      { name: "amountB", type: "uint256" },
+      { name: "deadline", type: "uint256" },
+      { name: "nonce", type: "uint256" },
+      { name: "signature", type: "bytes" }
+    ],
+    outputs: [{ name: "", type: "bool" }]
+  }
+];
 const ERC20_ABI = [
+  {
+    type: "function",
+    name: "decimals",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint8" }]
+  },
   {
     type: "function",
     name: "allowance",
@@ -114,6 +143,11 @@ const ovDeadlineDatetime = document.getElementById("ovDeadlineDatetime");
 const ovNonce = document.getElementById("ovNonce");
 const ovSignature = document.getElementById("ovSignature");
 const ovOffer = document.getElementById("ovOffer");
+const marketMessage = document.getElementById("marketMessage");
+const marketForm = document.getElementById("marketForm");
+const marketTokenA = document.getElementById("marketTokenA");
+const marketTokenB = document.getElementById("marketTokenB");
+const marketOffer = document.getElementById("marketOffer");
 
 // -----------------------------------------------------------------------------
 // token support for arbitrary ERC‑20s
@@ -137,7 +171,7 @@ const KNOWN_TOKENS = {
 // populate the <select> controls with known tokens and a custom option
 function populateTokenSelects(chainId) {
   const tokens = KNOWN_TOKENS[String(chainId)] || [];
-  [fromToken, toToken].forEach((sel) => {
+  [fromToken, toToken, marketTokenA, marketTokenB].forEach((sel) => {
     if (!sel) return;
     sel.innerHTML = "";
     tokens.forEach((t) => {
@@ -178,6 +212,8 @@ function handleCustomTokenSelection(event) {
 // wire up token selectors after DOM is ready
 fromToken?.addEventListener("change", handleCustomTokenSelection);
 toToken?.addEventListener("change", handleCustomTokenSelection);
+marketTokenA?.addEventListener("change", handleCustomTokenSelection);
+marketTokenB?.addEventListener("change", handleCustomTokenSelection);
 
 // sync overview deadline inputs: datetime-local <-> unix
 if (ovDeadlineDatetime && ovDeadlineUnix) {
@@ -241,11 +277,6 @@ function initializeTabs() {
   });
 }
 
-// wire up token selectors after DOM is ready
-fromToken?.addEventListener("change", handleCustomTokenSelection);
-toToken?.addEventListener("change", handleCustomTokenSelection);
-
-
 let isConnected = false;
 let configCache = null;
 let walletClient = null;
@@ -254,6 +285,7 @@ let currentChainId = null;
 let currentAccount = null;
 let currentExplorerBase = null;
 let orderNonce = 67n;
+const tokenDecimalsCache = new Map();
 
 // browsing / filling orders state
 let ordersRows = [];
@@ -285,6 +317,81 @@ function formatNumber(n) {
     return new Intl.NumberFormat().format(Number(n.toString()));
   } catch (_) {
     return n.toString();
+  }
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function setMarketMessage(text) {
+  if (!marketMessage) return;
+  marketMessage.textContent = text;
+}
+
+function getUiErrorMessage(error) {
+  if (!error) return "Unknown error";
+  if (typeof error.shortMessage === "string" && error.shortMessage.trim()) {
+    return error.shortMessage.trim();
+  }
+  if (typeof error.message === "string" && error.message.trim()) {
+    return error.message.split("\n")[0].trim();
+  }
+  return String(error);
+}
+
+function logDetailedError(context, error) {
+  console.error(`[${context}]`, error);
+  if (error?.message) {
+    console.error(`[${context}] full message:`, error.message);
+  }
+}
+
+function formatAmountForDisplay(baseUnits, decimals) {
+  try {
+    return formatUnits(BigInt(baseUnits), decimals);
+  } catch (_) {
+    return baseUnits?.toString?.() ?? String(baseUnits);
+  }
+}
+
+async function getTokenDecimals(tokenAddress) {
+  if (!tokenAddress) return 18;
+  const cacheKey = `${String(currentChainId)}:${tokenAddress.toLowerCase()}`;
+  if (tokenDecimalsCache.has(cacheKey)) {
+    return tokenDecimalsCache.get(cacheKey);
+  }
+  try {
+    const decimals = Number(
+      await publicClient.readContract({
+        address: getAddress(tokenAddress),
+        abi: ERC20_ABI,
+        functionName: "decimals",
+        args: []
+      })
+    );
+    const normalized = Number.isInteger(decimals) && decimals >= 0 ? decimals : 18;
+    tokenDecimalsCache.set(cacheKey, normalized);
+    return normalized;
+  } catch (_) {
+    tokenDecimalsCache.set(cacheKey, 18);
+    return 18;
+  }
+}
+
+async function parseTokenAmountInput(rawValue, tokenAddress) {
+  const value = (rawValue ?? "").trim();
+  if (!value) {
+    throw new Error("Amount is required.");
+  }
+  const decimals = await getTokenDecimals(tokenAddress);
+  try {
+    if (decimals === 18) {
+      return parseEther(value);
+    }
+    return parseUnits(value, decimals);
+  } catch (_) {
+    throw new Error(`Invalid token amount: \"${value}\"`);
   }
 }
 
@@ -386,7 +493,8 @@ async function initNetworks() {
     // pre‑populate token lists for the first network
     if (firstChainId) populateTokenSelects(Number(firstChainId));
   } catch (error) {
-    setMessage(`Error: ${error.message}`);
+    logDetailedError("initNetworks", error);
+    setMessage(`Error: ${getUiErrorMessage(error)}`);
   }
 }
 
@@ -456,6 +564,35 @@ async function estimateGasForContract({
   });
 }
 
+async function isOrderFillableOnChain(contractAddress, order) {
+  try {
+    const fillable = await publicClient.readContract({
+      address: getAddress(contractAddress),
+      abi: ABI_IS_FILLABLE,
+      functionName: "isFillable",
+      args: [
+        order.seller,
+        order.tokenA,
+        order.tokenB,
+        order.amountA,
+        order.amountB,
+        order.deadline,
+        order.nonce,
+        order.signature
+      ]
+    });
+    return fillable === true;
+  } catch (error) {
+    logDetailedError("isFillable", error);
+    return false;
+  }
+}
+
+function computeExpectedOutput(offer, amountA, amountB) {
+  if (amountB <= 0n) return 0n;
+  return (offer * amountA) / amountB;
+}
+
 // ----- order browsing helpers ------------------------------------------------
 
 function getPageFromUrl() {
@@ -491,8 +628,8 @@ function renderOrdersPage(page) {
           <div title="${row.seller}">${formatAddress(row.seller)}</div>
           <div title="${row.tokenA}">${formatAddress(row.tokenA)}</div>
           <div title="${row.tokenB}">${formatAddress(row.tokenB)}</div>
-          <div>${formatNumber(row.amountA)}</div>
-          <div>${formatNumber(row.amountB)}</div>
+          <div title="raw: ${row.amountA.toString()}">${row.amountAHuman}</div>
+          <div title="raw: ${row.amountB.toString()}">${row.amountBHuman}</div>
           <div title="${row.deadlineUnix}">${row.deadlineHuman} <small style="color:var(--muted);font-size:12px;display:block">${row.deadlineUnix}</small></div>
         </div>
       `;
@@ -504,12 +641,14 @@ function renderOrdersPage(page) {
   updateUrl(currentOrdersPage);
 }
 
-function loadOrderIntoOverview(order) {
+async function loadOrderIntoOverview(order) {
+  const tokenADecimals = await getTokenDecimals(order.tokenA);
+  const tokenBDecimals = await getTokenDecimals(order.tokenB);
   ovSeller.value = order.seller;
   ovTokenA.value = order.tokenA;
   ovTokenB.value = order.tokenB;
-  ovAmountA.value = order.amountA.toString();
-  ovAmountB.value = order.amountB.toString();
+  ovAmountA.value = formatAmountForDisplay(order.amountA, tokenADecimals);
+  ovAmountB.value = formatAmountForDisplay(order.amountB, tokenBDecimals);
   // populate both unix and datetime inputs
   const unix = Number(order.deadline?.toString() ?? 0);
   if (ovDeadlineUnix) ovDeadlineUnix.value = String(unix);
@@ -539,7 +678,7 @@ async function refreshOrders() {
   const logsWithTs = await addTimestampsToLogs(logs);
   // convert logs to simple objects and filter active
   const now = BigInt(Math.floor(Date.now() / 1000));
-  ordersRows = logsWithTs
+  const rows = logsWithTs
     .map((log) => {
       const args = log.args;
       const deadlineUnix = Number(args.deadline?.toString() ?? 0);
@@ -558,6 +697,27 @@ async function refreshOrders() {
         nonce: args.nonce,
         signature: args.signature
       };
+    });
+
+  const uniqueTokenAddresses = Array.from(
+    new Set(
+      rows
+        .flatMap((row) => [row.tokenA, row.tokenB])
+        .filter(Boolean)
+        .map((addr) => addr.toLowerCase())
+    )
+  );
+  await Promise.all(uniqueTokenAddresses.map((addr) => getTokenDecimals(addr)));
+
+  ordersRows = rows
+    .map((row) => {
+      const tokenADecimals = tokenDecimalsCache.get(`${String(currentChainId)}:${row.tokenA.toLowerCase()}`) ?? 18;
+      const tokenBDecimals = tokenDecimalsCache.get(`${String(currentChainId)}:${row.tokenB.toLowerCase()}`) ?? 18;
+      return {
+        ...row,
+        amountAHuman: formatAmountForDisplay(row.amountA, tokenADecimals),
+        amountBHuman: formatAmountForDisplay(row.amountB, tokenBDecimals)
+      };
     })
     .filter((o) => {
       try {
@@ -572,8 +732,14 @@ async function refreshOrders() {
       }
       return a.blockNumber > b.blockNumber ? -1 : 1;
     });
+
+  const fillableFlags = await Promise.all(
+    ordersRows.map((order) => isOrderFillableOnChain(chainConfig.address, order))
+  );
+  ordersRows = ordersRows.filter((_, idx) => fillableFlags[idx]);
+
   if (!ordersRows.length) {
-    ordersMessage.textContent = "No active orders posted yet.";
+    ordersMessage.textContent = "No active fillable orders posted yet.";
     ordersGridBody.innerHTML = "";
     ordersGrid.hidden = true;
     ordersPagination.hidden = true;
@@ -639,7 +805,8 @@ async function connectWallet() {
     // load orders for browsing
     refreshOrders();
   } catch (error) {
-    setMessage(`Error: ${error.message}`);
+    logDetailedError("connectWallet", error);
+    setMessage(`Error: ${getUiErrorMessage(error)}`);
   } finally {
     connectButton.disabled = false;
   }
@@ -784,7 +951,8 @@ networkSelect.addEventListener("change", async (event) => {
       setMessage("This network is not available in your wallet.");
       return;
     }
-    setMessage(`Error: ${error.message}`);
+    logDetailedError("switchChain", error);
+    setMessage(`Error: ${getUiErrorMessage(error)}`);
   } finally {
     // always refresh available tokens for the newly selected network
     populateTokenSelects(Number(chainId));
@@ -820,8 +988,8 @@ orderForm?.addEventListener("submit", async (event) => {
   try {
     setMessage("Validating order details...");
 
-    const parsedAmountA = BigInt(Math.floor(Number(amountAVal)));
-    const parsedAmountB = BigInt(Math.floor(Number(amountBVal)));
+    const parsedAmountA = await parseTokenAmountInput(amountAVal, tokenAAddr);
+    const parsedAmountB = await parseTokenAmountInput(amountBVal, tokenBAddr);
 
     if (parsedAmountA <= 0n || parsedAmountB <= 0n) {
       setMessage("Amounts must be greater than 0.");
@@ -944,7 +1112,8 @@ orderForm?.addEventListener("submit", async (event) => {
     orderForm.reset();
     updateDurationInputs();
   } catch (error) {
-    setMessage(`Error: ${error.message}`);
+    logDetailedError("createOrder", error);
+    setMessage(`Error: ${getUiErrorMessage(error)}`);
   }
 });
 
@@ -963,12 +1132,12 @@ ordersRefresh?.addEventListener("click", () => {
 });
 
 // click a row to populate overview
-ordersGridBody?.addEventListener("click", (event) => {
+ordersGridBody?.addEventListener("click", async (event) => {
   const row = event.target.closest(".order-row");
   if (!row) return;
   const idx = Number(row.dataset.index);
   const ord = ordersRows[idx];
-  if (ord) loadOrderIntoOverview(ord);
+  if (ord) await loadOrderIntoOverview(ord);
 });
 
 orderOverviewForm?.addEventListener("submit", async (event) => {
@@ -982,12 +1151,12 @@ orderOverviewForm?.addEventListener("submit", async (event) => {
     const seller = ovSeller.value.trim();
     const tokenA = ovTokenA.value.trim();
     const tokenB = ovTokenB.value.trim();
-    const amountAVal = BigInt(ovAmountA.value.trim() || 0);
-    const amountBVal = BigInt(ovAmountB.value.trim() || 0);
+    const amountAVal = await parseTokenAmountInput(ovAmountA.value, tokenA);
+    const amountBVal = await parseTokenAmountInput(ovAmountB.value, tokenB);
     const deadline = BigInt((ovDeadlineUnix?.value || "").trim() || 0);
     const nonce = BigInt(ovNonce.value.trim() || 0);
     const signature = ovSignature.value.trim();
-    const offer = BigInt(ovOffer.value.trim() || 0);
+    const offer = await parseTokenAmountInput(ovOffer.value, tokenB);
     if (!seller || !tokenA || !tokenB || !signature || offer <= 0n) {
       orderOverviewMessage.textContent = "Please supply all required fields and an offer > 0.";
       return;
@@ -1002,7 +1171,7 @@ orderOverviewForm?.addEventListener("submit", async (event) => {
       args: [currentAccount, spender]
     });
 
-    if (currentAllowance < amountBVal) {
+    if (currentAllowance < offer) {
       orderOverviewMessage.textContent = "Approving token transfer for fill order...";
       try {
         const approveHash = await walletClient.writeContract({
@@ -1010,20 +1179,21 @@ orderOverviewForm?.addEventListener("submit", async (event) => {
           address: getAddress(tokenB),
           abi: ERC20_ABI,
           functionName: "approve",
-          args: [spender, amountBVal],
+          args: [spender, offer],
           chain: chain ?? undefined,
           gas: await estimateGasForContract({
             address: tokenB,
             abi: ERC20_ABI,
             functionName: "approve",
-            args: [spender, amountBVal]
+            args: [spender, offer]
           })
         });
         const explorer = getExplorerBase(currentChainId);
         const link = explorer ? `${explorer}/tx/${approveHash}` : null;
         orderOverviewMessage.innerHTML = link
-          ? `Approval sent; tx <a href="${link}" target="_blank" rel="noreferrer">${approveHash.slice(0,6)}...${approveHash.slice(-4)}</a>. Submitting fill...`
-          : "Approval transaction sent. Submitting fill...";
+          ? `Approval sent; tx <a href="${link}" target="_blank" rel="noreferrer">${approveHash.slice(0,6)}...${approveHash.slice(-4)}</a>. Waiting ~10s before fill...`
+          : "Approval transaction sent. Waiting ~10s before fill...";
+        await sleep(APPROVAL_DELAY_MS);
       } catch (error) {
         throw new Error(`Approval failed: ${error.message}`);
       }
@@ -1053,7 +1223,185 @@ orderOverviewForm?.addEventListener("submit", async (event) => {
     txModal.hidden = false;
     orderOverviewMessage.textContent = "";
   } catch (err) {
-    orderOverviewMessage.textContent = `Error: ${err.message}`;
+    logDetailedError("fillOrder", err);
+    orderOverviewMessage.textContent = `Error: ${getUiErrorMessage(err)}`;
+  }
+});
+
+marketForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!isConnected || !configCache || !currentChainId || !currentAccount) {
+    setMarketMessage("Connect wallet first.");
+    return;
+  }
+
+  try {
+    const chainConfig = configCache[String(currentChainId)];
+    if (!chainConfig?.address) {
+      setMarketMessage("This app has not been deployed on the connected chain.");
+      return;
+    }
+
+    const tokenA = marketTokenA?.value?.trim();
+    const tokenB = marketTokenB?.value?.trim();
+    const offerInput = marketOffer?.value?.trim();
+
+    if (!tokenA || !tokenB || !offerInput) {
+      setMarketMessage("Please select both tokens and enter an offer amount.");
+      return;
+    }
+
+    if (tokenA.toLowerCase() === tokenB.toLowerCase()) {
+      setMarketMessage("Receive token and pay token must be different.");
+      return;
+    }
+
+    const offer = await parseTokenAmountInput(offerInput, tokenB);
+    if (offer <= 0n) {
+      setMarketMessage("Offer must be greater than 0.");
+      return;
+    }
+
+    setMarketMessage("Scanning on-chain posted orders...");
+    await refreshOrders();
+
+    const desiredTokenA = tokenA.toLowerCase();
+    const desiredTokenB = tokenB.toLowerCase();
+
+    const rankedCandidates = ordersRows
+      .filter((order) =>
+        order.tokenA.toLowerCase() === desiredTokenA &&
+        order.tokenB.toLowerCase() === desiredTokenB &&
+        offer <= BigInt(order.amountB)
+      )
+      .map((order) => ({
+        order,
+        expectedOut: computeExpectedOutput(offer, BigInt(order.amountA), BigInt(order.amountB))
+      }))
+      .filter((item) => item.expectedOut > 0n)
+      .sort((a, b) => {
+        if (a.expectedOut === b.expectedOut) {
+          if (a.order.blockNumber === b.order.blockNumber) {
+            return b.order.logIndex - a.order.logIndex;
+          }
+          return a.order.blockNumber > b.order.blockNumber ? -1 : 1;
+        }
+        return a.expectedOut > b.expectedOut ? -1 : 1;
+      });
+
+    if (!rankedCandidates.length) {
+      setMarketMessage("No fillable on-chain order matches this token pair and offer size.");
+      return;
+    }
+
+    const chain = getChainById(currentChainId);
+    const spender = getAddress(chainConfig.address);
+    const currentAllowance = await publicClient.readContract({
+      address: getAddress(tokenB),
+      abi: ERC20_ABI,
+      functionName: "allowance",
+      args: [currentAccount, spender]
+    });
+
+    if (currentAllowance < offer) {
+      setMarketMessage("Approving pay token for market trade...");
+      const approveHash = await walletClient.writeContract({
+        account: currentAccount,
+        address: getAddress(tokenB),
+        abi: ERC20_ABI,
+        functionName: "approve",
+        args: [spender, offer],
+        chain: chain ?? undefined,
+        gas: await estimateGasForContract({
+          address: tokenB,
+          abi: ERC20_ABI,
+          functionName: "approve",
+          args: [spender, offer]
+        })
+      });
+
+      const explorer = getExplorerBase(currentChainId);
+      if (explorer && marketMessage) {
+        marketMessage.innerHTML = `Approval sent; tx <a href="${explorer}/tx/${approveHash}" target="_blank" rel="noreferrer">${approveHash.slice(0, 6)}...${approveHash.slice(-4)}</a>.`;
+      }
+      await sleep(APPROVAL_DELAY_MS);
+    }
+
+    setMarketMessage("Selecting best executable order...");
+
+    let selectedOrder = null;
+    let selectedExpectedOut = 0n;
+    let selectedGas = null;
+
+    for (const candidate of rankedCandidates) {
+      const args = [
+        candidate.order.seller,
+        candidate.order.tokenA,
+        candidate.order.tokenB,
+        candidate.order.amountA,
+        candidate.order.amountB,
+        candidate.order.deadline,
+        candidate.order.nonce,
+        candidate.order.signature,
+        offer
+      ];
+      try {
+        const gasEstimate = await estimateGasForContract({
+          address: chainConfig.address,
+          abi: ABI_FILL_ORDER,
+          functionName: "fillOrder",
+          args
+        });
+        selectedOrder = candidate.order;
+        selectedExpectedOut = candidate.expectedOut;
+        selectedGas = gasEstimate;
+        break;
+      } catch (_) {
+        continue;
+      }
+    }
+
+    if (!selectedOrder || !selectedGas) {
+      setMarketMessage("No executable order is currently available for this market request.");
+      return;
+    }
+
+    setMarketMessage("Submitting market fill transaction...");
+
+    const hash = await walletClient.writeContract({
+      account: currentAccount,
+      address: getAddress(chainConfig.address),
+      abi: ABI_FILL_ORDER,
+      functionName: "fillOrder",
+      args: [
+        selectedOrder.seller,
+        selectedOrder.tokenA,
+        selectedOrder.tokenB,
+        selectedOrder.amountA,
+        selectedOrder.amountB,
+        selectedOrder.deadline,
+        selectedOrder.nonce,
+        selectedOrder.signature,
+        offer
+      ],
+      chain: chain ?? undefined,
+      gas: selectedGas
+    });
+
+    const tokenADecimals = await getTokenDecimals(selectedOrder.tokenA);
+    const expectedOutHuman = formatAmountForDisplay(selectedExpectedOut, tokenADecimals);
+    const explorer = getExplorerBase(currentChainId);
+    const shortHash = `${hash.slice(0, 6)}...${hash.slice(-4)}`;
+    txBody.innerHTML = explorer
+      ? `Market trade submitted. Hash: <a href="${explorer}/tx/${hash}" target="_blank" rel="noreferrer">${shortHash}</a><br />Expected receive amount: ${expectedOutHuman}`
+      : `Market trade submitted. Hash: ${shortHash}<br />Expected receive amount: ${expectedOutHuman}`;
+    txModal.hidden = false;
+    setMarketMessage("");
+    marketForm.reset();
+    await refreshOrders();
+  } catch (error) {
+    logDetailedError("marketFill", error);
+    setMarketMessage(`Error: ${getUiErrorMessage(error)}`);
   }
 });
 

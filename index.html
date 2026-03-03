@@ -41,6 +41,7 @@
       <nav class="tabs-nav">
         <button class="tab-btn active" data-tab="create">Create</button>
         <button class="tab-btn" data-tab="browse">Browse</button>
+        <button class="tab-btn" data-tab="market">Market</button>
       </nav>
 
       <!-- Create Tab Content -->
@@ -62,8 +63,8 @@
           <div class="field">
             <span>Amounts</span>
             <div style="display:flex;gap:8px;flex-wrap:wrap;">
-              <input id="amountA" type="number" min="0" step="0.0001" placeholder="Token A" required />
-              <input id="amountB" type="number" min="0" step="0.0001" placeholder="Token B" required />
+              <input id="amountA" type="number" min="0" step="0.000001" placeholder="Token A" required />
+              <input id="amountB" type="number" min="0" step="0.000001" placeholder="Token B" required />
             </div>
           </div>
           <div class="field">
@@ -86,6 +87,31 @@
           </div>
           <div class="form-actions">
             <button type="submit" class="btn">Create</button>
+          </div>
+        </form>
+      </section>
+
+      <!-- Market Tab Content -->
+      <section class="tab-panel panel" data-tab="market" id="marketPanel">
+        <div class="panel-head">
+          <h2>Market Trade (Best Available)</h2>
+        </div>
+        <div id="marketMessage" class="message" role="status"></div>
+        <form id="marketForm" class="form">
+          <label class="field">
+            <span>Token You Want To Receive</span>
+            <select id="marketTokenA" class="select" required></select>
+          </label>
+          <label class="field">
+            <span>Token You Want To Pay</span>
+            <select id="marketTokenB" class="select" required></select>
+          </label>
+          <label class="field">
+            <span>Your offer amount (in pay token)</span>
+            <input id="marketOffer" type="number" min="0" step="0.000001" required />
+          </label>
+          <div class="form-actions">
+            <button type="submit" class="btn">Execute at Market Price</button>
           </div>
         </form>
       </section>
@@ -133,11 +159,11 @@
               </label>
               <label class="field">
                 <span>Amount of Token A</span>
-                <input id="ovAmountA" type="number" min="0" required />
+                <input id="ovAmountA" type="number" min="0" step="0.000001" required />
               </label>
               <label class="field">
                 <span>Amount of Token B</span>
-                <input id="ovAmountB" type="number" min="0" required />
+                <input id="ovAmountB" type="number" min="0" step="0.000001" required />
               </label>
               <label class="field">
                 <span>Deadline</span>
@@ -155,8 +181,8 @@
                 <input id="ovSignature" rows="2" style="width:100%;" required>
               </label>
               <label class="field">
-                <span>Your offer (units of token A)</span>
-                <input id="ovOffer" type="number" min="0" required />
+                <span>Your offer (units of token B)</span>
+                <input id="ovOffer" type="number" min="0" step="0.000001" required />
               </label>
               <div class="form-actions">
                 <button type="submit" class="btn">Fill Order</button>
