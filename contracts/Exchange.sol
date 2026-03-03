@@ -170,12 +170,12 @@ contract Exchange is EIP712 {
         // this forum thread recommends SafeERC20? 
         // thread: https://forum.openzeppelin.com/t/should-i-check-for-transfer-result-for-an-erc20/37018
         // SafeERC20: https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/token/ERC20/utils/SafeERC20.sol
-        bool success = ERC20(tokenA).transferFrom(from, msg.sender, amountToTransfer);
+        bool success = ERC20(tokenA).transferFrom(seller, msg.sender, amountToTransfer);
         require(success, "Failed to transfer tokenA");
-        success = ERC20(tokenB).transferFrom(msg.sender, from, offer);
+        success = ERC20(tokenB).transferFrom(msg.sender, seller, offer);
         require(success, "Failed to transfer tokenB");
         // Check ERC20 allowance to see if order is fully used
-        if (ERC20(tokenA).allowance(from, address(this)) == 0) {
+        if (ERC20(tokenA).allowance(seller, address(this)) == 0) {
             used[hash] = true;
         }
         return true;
