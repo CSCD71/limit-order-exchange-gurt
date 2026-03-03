@@ -1,0 +1,22 @@
+{
+    "name": "Exchange",
+    "version": "1.0.0",
+    "description": "Limit Order Exchange",
+    "type": "module",
+    "main": "./index.mjs",
+    "author": "Julian Liu",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": ""
+    },
+    "scripts": {
+        "test": "vitest --run tests/**",
+        "test:watch": "vitest"
+    },
+    "dependencies": {
+        "solmate": "^6.8.0",
+        "viem": "^2.45.1",
+        "vitest": "^4.0.18"
+    }
+}

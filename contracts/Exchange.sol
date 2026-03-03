@@ -1,151 +1,207 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.32;
 
-import { Order } from "./Order.sol";
+import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
+import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import {FixedPointMathLib} from "solmate/utils/FixedPointMathLib.sol";
 
-contract Exchange {
+contract Exchange is EIP712 {
+    using ECDSA for bytes32;
+    using SafeERC20 for ERC20;
+    
+    bytes32 public constant ORDER_TYPEHASH = keccak256(
+        "Order(address seller,address tokenA,address tokenB,uint256 amountA,uint256 amountB,uint256 deadline,uint256 nonce)"
+    );
 
-    /*
-    //Store current available orders
-    struct Order {
-        address seller;
-        address tokenA;
-        address tokenB;
-        uint amountA;
-        uint amountB;
-        uint filledAmountA;
-        uint filledAmountB;
-        uint lifetime;
-        uint nonce;
-        bytes signature;
-    }
-    mapping(uint => Order) public orders;
-    */
-    uint public orderCount = 0; // Simple incrementor for order IDs
-    mapping(uint => bool) public usedNonces;
-    mapping(address -> uint) public deadlines;
+    // Keep track of sellers' active order
+    mapping(address => uint256) public activeOrders;
 
-    // Events for off-chain order book tracking
-    event OrderDeployed(
-        uint indexed orderId,
-        address indexed seller,
+    // Keep track of used orders
+    mapping(bytes32 => bool) public used;
+
+    // Event that allows sellers to publish orders on-chain
+    event OrderPosted(
+        address seller,
         address tokenA,
         address tokenB,
-        uint amountA,
-        uint amountB,
-        uint deadline,
-        uint nonce,
+        uint256 amountA,
+        uint256 amountB,
+        uint256 deadline,
+        uint256 nonce,
         bytes signature
     );
-    event OrderFilled(
-        uint indexed orderId,
-        address indexed buyer,
-        uint amountAFilled,
-        uint amountBFilled
-    );
-    event OrderCancelled(uint indexed orderId);
+
+	  constructor() EIP712("GurtEX", "1") {}
+
+    function hashOrder(
+        address seller,
+        address tokenA,
+        address tokenB,
+        uint256 amountA,
+        uint256 amountB,
+        uint256 deadline,
+        uint256 nonce
+    ) internal view returns (bytes32) {
+        return _hashTypedDataV4(keccak256(
+            abi.encode(
+                ORDER_TYPEHASH,
+                seller,
+                tokenA,
+                tokenB,
+                amountA,
+                amountB,
+                deadline,
+                nonce
+            )
+        ));
+    }
 
     function createOrder(
         address tokenA,
         address tokenB,
-        uint amountA,
-        uint amountB,
-        uint lifetime,
-        uint nonce,
-        bytes signature
-    ) public returns (uint) {
-        require(amountA > 0 && amountB > 0, "Invalid amounts");
-        
-        uint orderId = orderCount++;
-        /*
-        orders[orderId] = Order({
-            seller: msg.sender,
-            tokenA: tokenA,
-            tokenB: tokenB,
-            amountA: amountA,
-            amountB: amountB,
-            filledAmountA: 0,
-            filledAmountB: 0,
-            deadline: block.timestamp + lifetime,
-            nonce: nonce,
-            signature: signature
-        });
-        */
-        // Todo: Validate signature
-        emit OrderDeployed(orderId, msg.sender, tokenA, tokenB, amountA, amountB, block.timestamp + lifetime, nonce, signature);
-        return orderId;
+        uint256 amountA,
+        uint256 amountB,
+        uint256 deadline,
+        uint256 nonce,
+        bytes memory signature,
+        bool postOnChain
+    ) public returns (bool) {
+        // Verify order values
+        require(tokenA != address(0), "Invalid tokenA");
+        require(tokenB != address(0), "Invalid tokenB");
+        require(amountA > 0, "Value amountA must be positive");
+        require(amountB > 0, "Value amountB must be positive");
+        require(deadline > block.timestamp, "Deadline must be in the future");
+        // Check that the seller has approved GurtEX
+        require(
+            ERC20(tokenA).allowance(msg.sender, address(this)) >= amountA,
+            "Seller has not approved GurtEX"
+        );
+        // Compute order hash
+        bytes32 hash = hashOrder(
+            msg.sender,
+            tokenA,
+            tokenB,
+            amountA,
+            amountB,
+            deadline,
+            nonce
+        );
+        // Check that order has not been filled already
+        require(!used[hash], "Cannot create an order that has already been filled");
+        // Check that the signer is the msg.sender
+        address signer = ECDSA.recover(hash, signature);
+        require(signer == msg.sender, "Invalid signature");
+        // Keep track of seller's order
+        activeOrders[msg.sender] = deadline;
+        // Optionally broadcast order on chain
+        if (postOnChain) {
+            emit OrderPosted(
+              msg.sender,
+              tokenA,
+              tokenB,
+              amountA,
+              amountB,
+              deadline,
+              nonce,
+              signature
+            );
+        }
+        return true;
     }
 
-    // Fill an order partially by specifying how much tokenA you want
-    // Todo: bulk orders
+    function cancelActiveOrder() public {
+        activeOrders[msg.sender] = 0;
+    }
+
+    function isFillable(
+        address seller,
+        address tokenA,
+        address tokenB,
+        uint256 amountA,
+        uint256 amountB,
+        uint256 deadline,
+        uint256 nonce,
+        bytes memory signature
+    ) public view returns (bool) {
+        // Check that the order is active
+        require(activeOrders[seller] == deadline, "Order is inactive");
+        // Check if the order has expired
+        require(block.timestamp <= deadline, "Order has expired");
+        // Check that this contract can spend on behalf of the seller
+        uint256 approvedAmount = ERC20(tokenA).allowance(seller, address(this));
+        require(approvedAmount > 0, "Order can no longer be filled");
+        // Compute order hash
+        bytes32 hash = hashOrder(
+            seller,
+            tokenA,
+            tokenB,
+            amountA,
+            amountB,
+            deadline,
+            nonce
+        );
+        // Check if the order has been fully used already
+        require(!used[hash], "Order has been filled already");
+        // Extract the signer
+        address signer = ECDSA.recover(hash, signature);
+        // Check that the signer is the seller
+        require(signer == seller, "Invalid signature");
+        return true;
+    }
+
     function fillOrder(
         address seller,
         address tokenA,
         address tokenB,
-        uint amountA,
-        uint amountB,
-        uint lifetime,
-        uint nonce,
-        bytes signature,
-        uint desiredAmountA,
-        uint orderId) public returns (bool) {
-        // Todo: Validate signature and nonce, check for replay attack
-        /*
-        Order storage order = orders[orderId];
-        
-        require(order, "Order does not exist or was cancelled");
-        require(block.timestamp < order.deadline, "Order expired");
-        require(order.filledAmountA < order.amountA, "Order fully filled");
-        */
-        
-        // This section also needs editing
-        uint remainingAmountA = order.amountA - order.filledAmountA;
-        uint remainingAmountB = order.amountB - order.filledAmountB;
-        
-        // Clamp to remaining amount
-        uint amountAToFill = desiredAmountA > remainingAmountA ? remainingAmountA : desiredAmountA;
-        
-        // Calculate proportional tokenB needed for this amount of tokenA
-        uint amountBToFill = (amountAToFill * remainingAmountB) / remainingAmountA;
-        
-        order.filledAmountA += amountAToFill;
-        order.filledAmountB += amountBToFill;
-        
-        // Buyer sends tokenB to seller
-        ERC20(order.tokenB).transferFrom(msg.sender, order.seller, amountBToFill);
-        
-        // Seller sends tokenA to buyer
-        ERC20(order.tokenA).transferFrom(order.seller, msg.sender, amountAToFill);
-
-        // Todo: Make sure to check that transfers succeeded
-        
-        emit OrderFilled(orderId, msg.sender, amountAToFill, amountBToFill);
+        uint256 amountA,
+        uint256 amountB,
+        uint256 deadline,
+        uint256 nonce,
+        bytes memory signature,
+        uint256 offer
+    ) public returns (bool) {
+        // Check that the offer is valid
+        require(offer > 0, "Offer amount must be positive");
+        require(offer <= amountB, "Offer amount cannot exceed order specification");
+        // Check that the order is fillable
+        require(
+            isFillable(seller, tokenA, tokenB, amountA, amountB, deadline, nonce, signature),
+            "Order is not fillable"
+        );
+        // Check that this contract can spend on behalf of msg.sender
+        require(
+            ERC20(tokenB).allowance(msg.sender, address(this)) >= offer,
+            "Buyer has not approved GurtEX"
+        );
+        // Fixed Point Math from https://rareskills.io/post/solidity-fixed-point#converting-an-integer-to-a-fixed-point-number
+        // Github: https://github.com/transmissions11/solmate/blob/main/src/utils/FixedPointMathLib.sol
+        uint256 amountToTransfer = FixedPointMathLib.mulDivDown(offer, amountA, amountB);
+        { // Scope to prevent "stack too deep" during compilation 
+            // Check that the seller has approved the amount to transfer
+            uint256 sellerApprovedAmount = ERC20(tokenA).allowance(seller, address(this));
+            require(sellerApprovedAmount >= amountToTransfer, "Offer is too high for the remaining number of token A");
+            // Mark the order as used if to be fully filled
+            if (amountToTransfer == amountA || amountToTransfer == sellerApprovedAmount) {
+                bytes32 hash = hashOrder(
+                    seller,
+                    tokenA,
+                    tokenB,
+                    amountA,
+                    amountB,
+                    deadline,
+                    nonce
+                );
+                used[hash] = true;
+            }
+        }
+        // Perform token exchange
+        // Thread recommending SafeERC20: https://forum.openzeppelin.com/t/should-i-check-for-transfer-result-for-an-erc20/37018
+        // SafeERC20: https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/token/ERC20/utils/SafeERC20.sol
+        ERC20(tokenA).safeTransferFrom(seller, msg.sender, amountToTransfer);
+        ERC20(tokenB).safeTransferFrom(msg.sender, seller, offer);
         return true;
-    }
-
-    function cancelOrder(
-        address seller,
-        address tokenA,
-        address tokenB,
-        uint amountA,
-        uint amountB,
-        uint lifetime,
-        uint nonce,
-        bytes signature,
-        uint orderId) public {
-        /*
-        Order storage order = orders[orderId];
-        require(order, "Order does not exist or already cancelled");
-        */
-        require(msg.sender == seller, "Only seller can cancel");
-        
-        //delete orders[orderId];
-        // Todo: Mark nonce as used, reset seller deadline.
-        emit OrderCancelled(orderId);
-    }
-
-    // Don't know if this is necessary, needs review
-    function getOrder(uint orderId) public view returns (Order memory) {
-        return orders[orderId];
     }
 }
