@@ -2,12 +2,14 @@
 pragma solidity ^0.8.32;
 
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
-import {FixedPointMathLib} from "@solmate/src/utils/FixedPointMathLib.sol";
+import {FixedPointMathLib} from "solmate/utils/FixedPointMathLib.sol";
 
 contract Exchange is EIP712 {
     using ECDSA for bytes32;
+    using SafeERC20 for ERC20;
     
     bytes32 public constant ORDER_TYPEHASH = keccak256(
         "Order(address seller,address tokenA,address tokenB,uint256 amountA,uint256 amountB,uint256 deadline,uint256 nonce)"
@@ -33,6 +35,29 @@ contract Exchange is EIP712 {
 
 	  constructor() EIP712("GurtEX", "1") {}
 
+    function hashOrder(
+        address seller,
+        address tokenA,
+        address tokenB,
+        uint256 amountA,
+        uint256 amountB,
+        uint256 deadline,
+        uint256 nonce
+    ) internal view returns (bytes32) {
+        return _hashTypedDataV4(keccak256(
+            abi.encode(
+                ORDER_TYPEHASH,
+                seller,
+                tokenA,
+                tokenB,
+                amountA,
+                amountB,
+                deadline,
+                nonce
+            )
+        ));
+    }
+
     function createOrder(
         address tokenA,
         address tokenB,
@@ -55,18 +80,15 @@ contract Exchange is EIP712 {
             "Seller has not approved GurtEX"
         );
         // Compute order hash
-        bytes32 hash = _hashTypedDataV4(keccak256(
-            abi.encode(
-                ORDER_TYPEHASH,
-                msg.sender,
-                tokenA,
-                tokenB,
-                amountA,
-                amountB,
-                deadline,
-                nonce
-            )
-        ));
+        bytes32 hash = hashOrder(
+            msg.sender,
+            tokenA,
+            tokenB,
+            amountA,
+            amountB,
+            deadline,
+            nonce
+        );
         // Check that order has not been filled already
         require(!used[hash], "Cannot create an order that has already been filled");
         // Check that the signer is the msg.sender
@@ -103,27 +125,24 @@ contract Exchange is EIP712 {
         uint256 deadline,
         uint256 nonce,
         bytes memory signature
-    ) public returns (bool) {
+    ) public view returns (bool) {
         // Check that the order is active
         require(activeOrders[seller] == deadline, "Order is inactive");
         // Check if the order has expired
         require(block.timestamp <= deadline, "Order has expired");
         // Check that this contract can spend on behalf of the seller
-        uint256 approvedAmount = ERC20(tokenB).allowance(seller, address(this));
+        uint256 approvedAmount = ERC20(tokenA).allowance(seller, address(this));
         require(approvedAmount > 0, "Order can no longer be filled");
-        // Create the hash
-        bytes32 hash = _hashTypedDataV4(keccak256(
-            abi.encode(
-                ORDER_TYPEHASH,
-                seller,
-                tokenA,
-                tokenB,
-                amountA,
-                amountB,
-                deadline,
-                nonce
-            )
-        ));
+        // Compute order hash
+        bytes32 hash = hashOrder(
+            seller,
+            tokenA,
+            tokenB,
+            amountA,
+            amountB,
+            deadline,
+            nonce
+        );
         // Check if the order has been fully used already
         require(!used[hash], "Order has been filled already");
         // Extract the signer
@@ -153,31 +172,36 @@ contract Exchange is EIP712 {
             "Order is not fillable"
         );
         // Check that this contract can spend on behalf of msg.sender
-        uint256 buyerApprovedAmount = ERC20(tokenB).allowance(msg.sender, address(this));
-        require(buyerApprovedAmount >= offer, "Buyer has not approved GurtEX");
+        require(
+            ERC20(tokenB).allowance(msg.sender, address(this)) >= offer,
+            "Buyer has not approved GurtEX"
+        );
         // Fixed Point Math from https://rareskills.io/post/solidity-fixed-point#converting-an-integer-to-a-fixed-point-number
         // Github: https://github.com/transmissions11/solmate/blob/main/src/utils/FixedPointMathLib.sol
         uint256 amountToTransfer = FixedPointMathLib.mulDivDown(offer, amountA, amountB);
-        // Check that the seller has approved the amount to transfer
-        uint256 sellerApprovedAmount = ERC20(tokenA).allowance(seller, address(this));
-        require(sellerApprovedAmount >= amountToTransfer, "Offer is too high for the remaining number of token A");
-        // Mark the order as used if to be fully filled
-        if (amountToTransfer == amountA || amountToTransfer == sellerApprovedAmount) {
-            used[hash] = true;
+        { // Scope to prevent "stack too deep" during compilation 
+            // Check that the seller has approved the amount to transfer
+            uint256 sellerApprovedAmount = ERC20(tokenA).allowance(seller, address(this));
+            require(sellerApprovedAmount >= amountToTransfer, "Offer is too high for the remaining number of token A");
+            // Mark the order as used if to be fully filled
+            if (amountToTransfer == amountA || amountToTransfer == sellerApprovedAmount) {
+                bytes32 hash = hashOrder(
+                    seller,
+                    tokenA,
+                    tokenB,
+                    amountA,
+                    amountB,
+                    deadline,
+                    nonce
+                );
+                used[hash] = true;
+            }
         }
         // Perform token exchange
-        // Note on ERC20:transferFrom... 
-        // this forum thread recommends SafeERC20? 
-        // thread: https://forum.openzeppelin.com/t/should-i-check-for-transfer-result-for-an-erc20/37018
+        // Thread recommending SafeERC20: https://forum.openzeppelin.com/t/should-i-check-for-transfer-result-for-an-erc20/37018
         // SafeERC20: https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/token/ERC20/utils/SafeERC20.sol
-        bool success = ERC20(tokenA).transferFrom(seller, msg.sender, amountToTransfer);
-        require(success, "Failed to transfer tokenA");
-        success = ERC20(tokenB).transferFrom(msg.sender, seller, offer);
-        require(success, "Failed to transfer tokenB");
-        // Check ERC20 allowance to see if order is fully used
-        if (ERC20(tokenA).allowance(seller, address(this)) == 0) {
-            used[hash] = true;
-        }
+        ERC20(tokenA).safeTransferFrom(seller, msg.sender, amountToTransfer);
+        ERC20(tokenB).safeTransferFrom(msg.sender, seller, offer);
         return true;
     }
 }

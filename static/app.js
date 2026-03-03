@@ -685,6 +685,11 @@ async function signOrderWithEIP712(
     throw new Error("Wallet not connected.");
   }
 
+  const chainConfig = configCache?.[String(currentChainId)];
+  if (!chainConfig?.address) {
+    throw new Error("This app has not been deployed on the connected chain.");
+  }
+
   const chain = getChainById(currentChainId);
   if (!chain) {
     throw new Error("Chain not found.");
@@ -713,7 +718,7 @@ async function signOrderWithEIP712(
       name: "GurtEX",
       version: "1",
       chainId: currentChainId,
-      verifyingContract: getAddress("0xCE447D412Fc82c2A1Be9FFD055391c521f4401C2")
+      verifyingContract: getAddress(chainConfig.address)
     },
     message: {
       seller: currentAccount,
@@ -745,26 +750,6 @@ async function signOrderWithEIP712(
     throw new Error(`EIP-712 signing failed: ${error.message}`);
   }
 }
-
-networkSelect.addEventListener("change", async (event) => {
-  if (!window.ethereum) {
-    setMessage("No wallet detected. Install MetaMask or another provider.", "warn");
-    return;
-  }
-  const chainId = event.target.value;
-  if (!chainId) return;
-  try {
-    await walletClient.switchChain({
-      id: Number(chainId)
-    });
-  } catch (error) {
-    if (error && error.code === 4902) {
-      setMessage("This network is not available in your wallet.");
-      return;
-    }
-    setMessage(`Error: ${error.message}`);
-  }
-});
 
 // duration toggle helper
 function updateDurationInputs() {
