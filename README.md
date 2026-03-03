@@ -15,24 +15,32 @@ Note that the instructions are similar to that of Auction House
 
 ## Deploying on a Local Development Chain
 
-1. Install dependencies
+1. Install npm dependencies
 
   ```bash
   npm install
   ```
-2. Compile the Solidity contracts
+
+2. Install forge dependencies
+
+  ```bash
+  forge install OpenZeppelin/openzeppelin-contracts
+  forge install transmissions11/solmate
+  ```
+
+3. Compile the Solidity contracts
 
   ```bash
   forge build
   ```
 
-3. Start the local chain using `anvil` (in a separate terminal)
+4. Start the local chain using `anvil` (in a separate terminal)
 
   ```bash
   anvil
   ```
   
-4. Run the unit tests
+5. Run the unit tests
 
   ```bash
   npm test
@@ -141,6 +149,8 @@ forge verify-contract \
   <DEPLOYED_ADDRESS> \
   contracts/AuctionHouse.sol:AuctionHouse
 ```
+
+You can obtain an Etherscan API key through their website.
 
 ### Running the Frontend
 
