@@ -1,3 +1,12 @@
+/*
+ * Winter 2026 CSCD21 Assignment 2:
+ * Sell-Only Limit-Order Exchange
+ * 
+ * Julian Liu, Eddy Chen
+ * 
+ * This frontend code was built with AI assistance.
+ */
+
 import {
   createPublicClient,
   createWalletClient,
@@ -11,7 +20,6 @@ import {
 import * as chains from "https://esm.sh/viem@2.19.4/chains";
 
 const PAGE_SIZE = 6;
-const APPROVAL_DELAY_MS = 10_000;
 const ABI_EVENT = parseAbiItem(
   "event OrderPosted(address seller,address tokenA,address tokenB,uint256 amountA,uint256 amountB,uint256 deadline,uint256 nonce,bytes signature)"
 );
@@ -273,6 +281,14 @@ function initializeTabs() {
       if (activePanel) {
         activePanel.classList.add("active");
       }
+
+      if (tabName === "browse" && orderOverviewMessage) {
+        orderOverviewMessage.textContent = "Manually input order details below, or select a published order on the left.";
+      }
+
+      if (tabName === "browse" || tabName === "market") {
+        refreshOrders();
+      }
     });
   });
 }
@@ -318,10 +334,6 @@ function formatNumber(n) {
   } catch (_) {
     return n.toString();
   }
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function setMarketMessage(text) {
@@ -564,6 +576,89 @@ async function estimateGasForContract({
   });
 }
 
+async function ensureTokenApproval({
+  tokenAddress,
+  spender,
+  requiredAmount,
+  chain,
+  statusText,
+  statusHtml
+}) {
+  const token = getAddress(tokenAddress);
+  const targetSpender = getAddress(spender);
+  const allowance = await publicClient.readContract({
+    address: token,
+    abi: ERC20_ABI,
+    functionName: "allowance",
+    args: [currentAccount, targetSpender]
+  });
+
+  if (allowance >= requiredAmount) {
+    return;
+  }
+
+  const setStatusText = (msg) => {
+    if (typeof statusText === "function") statusText(msg);
+  };
+  const setStatusHtml = (msg) => {
+    if (typeof statusHtml === "function") {
+      statusHtml(msg);
+    } else {
+      setStatusText(msg.replace(/<[^>]*>/g, ""));
+    }
+  };
+
+  if (allowance > 0n) {
+    setStatusText("Resetting token allowance to 0...");
+    const resetHash = await walletClient.writeContract({
+      account: currentAccount,
+      address: token,
+      abi: ERC20_ABI,
+      functionName: "approve",
+      args: [targetSpender, 0n],
+      chain: chain ?? undefined,
+      gas: await estimateGasForContract({
+        address: token,
+        abi: ERC20_ABI,
+        functionName: "approve",
+        args: [targetSpender, 0n]
+      })
+    });
+
+    const explorer = getExplorerBase(currentChainId);
+    setStatusHtml(
+      explorer
+        ? `Allowance reset tx sent: <a href="${explorer}/tx/${resetHash}" target="_blank" rel="noreferrer">${resetHash.slice(0, 6)}...${resetHash.slice(-4)}</a>. Waiting for confirmation...`
+        : "Allowance reset transaction sent. Waiting for confirmation..."
+    );
+    await publicClient.waitForTransactionReceipt({ hash: resetHash });
+  }
+
+  setStatusText("Approving token transfer amount...");
+  const approveHash = await walletClient.writeContract({
+    account: currentAccount,
+    address: token,
+    abi: ERC20_ABI,
+    functionName: "approve",
+    args: [targetSpender, requiredAmount],
+    chain: chain ?? undefined,
+    gas: await estimateGasForContract({
+      address: token,
+      abi: ERC20_ABI,
+      functionName: "approve",
+      args: [targetSpender, requiredAmount]
+    })
+  });
+
+  const explorer = getExplorerBase(currentChainId);
+  setStatusHtml(
+    explorer
+      ? `Approval tx sent: <a href="${explorer}/tx/${approveHash}" target="_blank" rel="noreferrer">${approveHash.slice(0, 6)}...${approveHash.slice(-4)}</a>. Waiting for confirmation...`
+      : "Approval transaction sent. Waiting for confirmation..."
+  );
+  await publicClient.waitForTransactionReceipt({ hash: approveHash });
+}
+
 async function isOrderFillableOnChain(contractAddress, order) {
   try {
     const fillable = await publicClient.readContract({
@@ -673,6 +768,11 @@ async function refreshOrders() {
   if (!isConnected || !configCache || !currentChainId) return;
   const chainConfig = configCache[String(currentChainId)];
   if (!chainConfig || !chainConfig.address) return;
+
+  if (ordersMessage) {
+    ordersMessage.textContent = "Refreshing orders...";
+  }
+
   const deploymentBlock = await resolveDeploymentBlock(chainConfig);
   const logs = await fetchEvents(chainConfig.address, deploymentBlock);
   const logsWithTs = await addTimestampsToLogs(logs);
@@ -739,13 +839,13 @@ async function refreshOrders() {
   ordersRows = ordersRows.filter((_, idx) => fillableFlags[idx]);
 
   if (!ordersRows.length) {
-    ordersMessage.textContent = "No active fillable orders posted yet.";
+    ordersMessage.textContent = "Orders refreshed.";
     ordersGridBody.innerHTML = "";
     ordersGrid.hidden = true;
     ordersPagination.hidden = true;
     return;
   }
-  ordersMessage.textContent = "";
+  ordersMessage.textContent = "Orders refreshed.";
   ordersGrid.hidden = false;
   computeOrderPagination();
   ordersPagination.hidden = ordersTotalPages <= 1;
@@ -1006,39 +1106,16 @@ orderForm?.addEventListener("submit", async (event) => {
     // ensure the exchange contract is approved to transfer tokenA on behalf of user
     const chain = getChainById(currentChainId);
     const spender = getAddress(chainConfig.address);
-    // fetch current allowance
-    const currentAllowance = await publicClient.readContract({
-      address: getAddress(tokenAAddr),
-      abi: ERC20_ABI,
-      functionName: "allowance",
-      args: [currentAccount, spender]
-    });
-    if (currentAllowance < parsedAmountA) {
-      setMessage("Approving token transfer for order...");
-      try {
-        const approveHash = await walletClient.writeContract({
-          account: currentAccount,
-          address: getAddress(tokenAAddr),
-          abi: ERC20_ABI,
-          functionName: "approve",
-          args: [spender, parsedAmountA],
-          chain: chain ?? undefined,
-          gas: await estimateGasForContract({
-            address: tokenAAddr,
-            abi: ERC20_ABI,
-            functionName: "approve",
-            args: [spender, parsedAmountA],
-            chain: chain ?? undefined
-          })
-        });
-        const explorer = getExplorerBase(currentChainId);
-        const link = explorer ? `${explorer}/tx/${approveHash}` : null;
-        setMessage(link
-          ? `Approval sent; tx <a href="${link}" target="_blank" rel="noreferrer">${approveHash.slice(0,6)}...${approveHash.slice(-4)}</a>. Submitting order...`
-          : "Approval transaction sent. Submitting order...");
-      } catch (error) {
-        throw new Error(`Approval failed: ${error.message}`);
-      }
+    try {
+      await ensureTokenApproval({
+        tokenAddress: tokenAAddr,
+        spender,
+        requiredAmount: parsedAmountA,
+        chain,
+        statusText: (text) => setMessage(text)
+      });
+    } catch (error) {
+      throw new Error(`Approval failed: ${error.message}`);
     }
 
     setMessage("Signing order with your wallet (EIP-712)...");
@@ -1164,39 +1241,22 @@ orderOverviewForm?.addEventListener("submit", async (event) => {
 
     const chain = getChainById(currentChainId);
     const spender = getAddress(configCache[String(currentChainId)].address);
-    const currentAllowance = await publicClient.readContract({
-      address: getAddress(tokenB),
-      abi: ERC20_ABI,
-      functionName: "allowance",
-      args: [currentAccount, spender]
-    });
 
-    if (currentAllowance < offer) {
-      orderOverviewMessage.textContent = "Approving token transfer for fill order...";
-      try {
-        const approveHash = await walletClient.writeContract({
-          account: currentAccount,
-          address: getAddress(tokenB),
-          abi: ERC20_ABI,
-          functionName: "approve",
-          args: [spender, offer],
-          chain: chain ?? undefined,
-          gas: await estimateGasForContract({
-            address: tokenB,
-            abi: ERC20_ABI,
-            functionName: "approve",
-            args: [spender, offer]
-          })
-        });
-        const explorer = getExplorerBase(currentChainId);
-        const link = explorer ? `${explorer}/tx/${approveHash}` : null;
-        orderOverviewMessage.innerHTML = link
-          ? `Approval sent; tx <a href="${link}" target="_blank" rel="noreferrer">${approveHash.slice(0,6)}...${approveHash.slice(-4)}</a>. Waiting ~10s before fill...`
-          : "Approval transaction sent. Waiting ~10s before fill...";
-        await sleep(APPROVAL_DELAY_MS);
-      } catch (error) {
-        throw new Error(`Approval failed: ${error.message}`);
-      }
+    try {
+      await ensureTokenApproval({
+        tokenAddress: tokenB,
+        spender,
+        requiredAmount: offer,
+        chain,
+        statusText: (text) => {
+          orderOverviewMessage.textContent = text;
+        },
+        statusHtml: (html) => {
+          orderOverviewMessage.innerHTML = html;
+        }
+      });
+    } catch (error) {
+      throw new Error(`Approval failed: ${error.message}`);
     }
 
     orderOverviewMessage.textContent = "Submitting fill transaction...";
@@ -1296,36 +1356,17 @@ marketForm?.addEventListener("submit", async (event) => {
 
     const chain = getChainById(currentChainId);
     const spender = getAddress(chainConfig.address);
-    const currentAllowance = await publicClient.readContract({
-      address: getAddress(tokenB),
-      abi: ERC20_ABI,
-      functionName: "allowance",
-      args: [currentAccount, spender]
-    });
 
-    if (currentAllowance < offer) {
-      setMarketMessage("Approving pay token for market trade...");
-      const approveHash = await walletClient.writeContract({
-        account: currentAccount,
-        address: getAddress(tokenB),
-        abi: ERC20_ABI,
-        functionName: "approve",
-        args: [spender, offer],
-        chain: chain ?? undefined,
-        gas: await estimateGasForContract({
-          address: tokenB,
-          abi: ERC20_ABI,
-          functionName: "approve",
-          args: [spender, offer]
-        })
-      });
-
-      const explorer = getExplorerBase(currentChainId);
-      if (explorer && marketMessage) {
-        marketMessage.innerHTML = `Approval sent; tx <a href="${explorer}/tx/${approveHash}" target="_blank" rel="noreferrer">${approveHash.slice(0, 6)}...${approveHash.slice(-4)}</a>.`;
+    await ensureTokenApproval({
+      tokenAddress: tokenB,
+      spender,
+      requiredAmount: offer,
+      chain,
+      statusText: (text) => setMarketMessage(text),
+      statusHtml: (html) => {
+        if (marketMessage) marketMessage.innerHTML = html;
       }
-      await sleep(APPROVAL_DELAY_MS);
-    }
+    });
 
     setMarketMessage("Selecting best executable order...");
 
