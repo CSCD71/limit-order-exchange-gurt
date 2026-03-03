@@ -125,7 +125,7 @@ contract Exchange is EIP712 {
             return false;
         }
         // Mark the order as used if fully used? check ERC20 allowance?
-        used[hash] = true;
+        // used[hash] = true;
         // Token exchange (check that this contract can spend on behalf of msg.sender)
         require(ERC20(tokenB).allowance(msg.sender, address(this)) >= offer, "Buyer has not approved GurtEX");
         // Note on ERC20:transferFrom... 
@@ -141,6 +141,10 @@ contract Exchange is EIP712 {
         require(success, "Failed to transfer tokenA");
         success = ERC20(tokenB).transferFrom(msg.sender, from, offer);
         require(success, "Failed to transfer tokenB");
+        // Check ERC20 allowance to see if order is fully used
+        if (ERC20(tokenA).allowance(from, address(this)) == 0) {
+            used[hash] = true;
+        }
         return true;
     }
 }
