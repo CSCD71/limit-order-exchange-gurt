@@ -144,7 +144,7 @@ describe("Exchange", function () {
         const receipt = await client.waitForTransactionReceipt({ hash });
         receipts.push({label: "Deployment", receipt});
         const block = await client.getBlock({ blockNumber: receipt.blockNumber });
-        currentTime = BigInt(Date.now());
+        currentTime = BigInt(block.timestamp);
         const address = receipt.contractAddress;
         contract = {address, abi};
         // compile mock tokens contract
@@ -456,6 +456,9 @@ describe("Exchange", function () {
         const time = BigInt(60);
         const nonce = getNonce();
         beforeAll(async () => {
+            // Reset current time
+            const block = await client.getBlock({ blockNumber: "latest" });
+            currentTime = BigInt(block.timestamp);
             // Mint tokens to seller1 and buyer1
             await seller1.writeContract({ address: tokenAddresses[0], abi: tokenABIs[0], functionName: "mint", args: [seller1.account.address, parseEther("1")] });
             await buyer1.writeContract({ address: tokenAddresses[1], abi: tokenABIs[1], functionName: "mint", args: [buyer1.account.address, parseEther("1")] });
@@ -486,6 +489,121 @@ describe("Exchange", function () {
             // Create buy order
             const hash2 = await buyer1.writeContract({ address, abi, functionName: "fillOrder", args: [seller1.account.address, tokenAddresses[0], tokenAddresses[1], parseEther("1"), parseEther("1"), currentTime + time, nonce, signature, parseEther("1")] });
             await expect(hash2).rejects.toThrow("Order is inactive");
+        });
+    });
+
+    describe("Check Fillable", function (){
+        let receipt;
+        let receipt2;
+        let receipt3;
+        let receipt4;
+        let signature;
+        let signature2;
+        let signature3;
+        const time = BigInt(60);
+        const nonce = getNonce();
+        const nonce2 = getNonce();
+        const nonce3 = getNonce();
+        beforeAll(async () => {
+            // Mint tokens to seller1 and buyer1
+            await seller1.writeContract({ address: tokenAddresses[0], abi: tokenABIs[0], functionName: "mint", args: [seller1.account.address, parseEther("1")] });
+            await buyer1.writeContract({ address: tokenAddresses[1], abi: tokenABIs[1], functionName: "mint", args: [buyer1.account.address, parseEther("1")] });
+            signature = await signOrderWithEIP712(
+                tokenAddresses[0],
+                tokenAddresses[1],
+                parseEther("1"),
+                parseEther("1"),
+                currentTime + time,
+                nonce,
+                seller1,
+                contract.address,
+                foundry.id
+            );
+            const { address, abi } = contract;
+            const hash = await seller1.writeContract({ address, abi, functionName: "createOrder", args: [tokenAddresses[0], tokenAddresses[1], parseEther("1"), parseEther("1"), currentTime + time, nonce, signature, true] });
+            receipt = await client.waitForTransactionReceipt({ hash });
+            receipts.push({label: "Sell Order", receipt});
+
+            // Approve the exchange contract to transfer tokens on behalf of seller1
+            await seller1.writeContract({ address: tokenAddresses[0], abi: tokenABIs[0], functionName: "approve", args: [contract.address, parseEther("1")] });
+        });
+        it("Should return true for fillable orders", async function () {
+            const { address, abi } = contract;
+            const fillable = await buyer1.readContract({ address, abi, functionName: "isFillable", args: [seller1.account.address, tokenAddresses[0], tokenAddresses[1], parseEther("1"), parseEther("1"), currentTime + time, nonce, signature] });
+            expect(fillable).to.equal(true);
+        });
+        it("Should return false for filled orders", async function () {
+            // and on behalf of buyer1
+            await buyer1.writeContract({ address: tokenAddresses[1], abi: tokenABIs[1], functionName: "approve", args: [contract.address, parseEther("1")] });
+            // Create buy order
+            const hash2 = await buyer1.writeContract({ address, abi, functionName: "fillOrder", args: [seller1.account.address, tokenAddresses[0], tokenAddresses[1], parseEther("1"), parseEther("1"), currentTime + time, nonce, signature, parseEther("1")] });
+            receipt2 = await client.waitForTransactionReceipt({ hash: hash2 });
+            receipts.push({label: "Buy Order", receipt: receipt2});
+            // Check that the order is no longer fillable
+            const fillable = await buyer1.readContract({ address, abi, functionName: "isFillable", args: [seller1.account.address, tokenAddresses[0], tokenAddresses[1], parseEther("1"), parseEther("1"), currentTime + time, nonce, signature] });
+            expect(fillable).rejects.toThrow("Order has been filled already");
+        });
+        it("Should return false for cancelled orders", async function () {
+            // Mint tokens to seller1 and buyer1
+            await seller1.writeContract({ address: tokenAddresses[0], abi: tokenABIs[0], functionName: "mint", args: [seller1.account.address, parseEther("1")] });
+            await buyer1.writeContract({ address: tokenAddresses[1], abi: tokenABIs[1], functionName: "mint", args: [buyer1.account.address, parseEther("1")] });
+            signature2 = await signOrderWithEIP712(
+                tokenAddresses[0],
+                tokenAddresses[1],
+                parseEther("1"),
+                parseEther("1"),
+                currentTime + time,
+                nonce2,
+                seller1,
+                contract.address,
+                foundry.id
+            );
+            const { address, abi } = contract;
+            const hash = await seller1.writeContract({ address, abi, functionName: "createOrder", args: [tokenAddresses[0], tokenAddresses[1], parseEther("1"), parseEther("1"), currentTime + time, nonce2, signature2, true] });
+            receipt3 = await client.waitForTransactionReceipt({ hash });
+            receipts.push({label: "Sell Order", receipt: receipt3});
+
+            // Approve the exchange contract to transfer tokens on behalf of seller1
+            await seller1.writeContract({ address: tokenAddresses[0], abi: tokenABIs[0], functionName: "approve", args: [contract.address, parseEther("1")] });
+
+            // Cancel the order
+            await seller1.writeContract({ address, abi, functionName: "cancelActiveOrder", args: [] });
+
+            // Check that the old order is no longer fillable
+            const fillable = await buyer1.readContract({ address, abi, functionName: "isFillable", args: [seller1.account.address, tokenAddresses[0], tokenAddresses[1], parseEther("1"), parseEther("1"), currentTime + time, nonce2, signature2] });
+            expect(fillable).rejects.toThrow("Order has been cancelled");
+        });
+        it("Should return false for expired orders", async function () {
+            // Mint tokens to seller1 and buyer1
+            await seller1.writeContract({ address: tokenAddresses[0], abi: tokenABIs[0], functionName: "mint", args: [seller1.account.address, parseEther("1")] });
+            await buyer1.writeContract({ address: tokenAddresses[1], abi: tokenABIs[1], functionName: "mint", args: [buyer1.account.address, parseEther("1")] });
+            signature3 = await signOrderWithEIP712(
+                tokenAddresses[0],
+                tokenAddresses[1],
+                parseEther("1"),
+                parseEther("1"),
+                currentTime + time,
+                nonce3,
+                seller1,
+                contract.address,
+                foundry.id
+            );
+            const { address, abi } = contract;
+            const hash = await seller1.writeContract({ address, abi, functionName: "createOrder", args: [tokenAddresses[0], tokenAddresses[1], parseEther("1"), parseEther("1"), currentTime + time, nonce3, signature3, true] });
+            receipt4 = await client.waitForTransactionReceipt({ hash });
+            receipts.push({label: "Sell Order", receipt: receipt4});
+
+            // Approve the exchange contract to transfer tokens on behalf of seller1
+            await seller1.writeContract({ address: tokenAddresses[0], abi: tokenABIs[0], functionName: "approve", args: [contract.address, parseEther("1")] });
+
+            // increase blockchain time by one year
+            await client.request({ method: "anvil_increaseTime", params: [BigInt(60) + 1n], });
+            // mine 1 block
+            await client.request({method: "anvil_mine", params: [1] });
+
+            // Check that the old order is no longer fillable
+            const fillable = await buyer1.readContract({ address, abi, functionName: "isFillable", args: [seller1.account.address, tokenAddresses[0], tokenAddresses[1], parseEther("1"), parseEther("1"), currentTime + time, nonce3, signature3] });
+            expect(fillable).rejects.toThrow("Order has expired");
         });
     });
 });
